@@ -1,6 +1,6 @@
 {
  "brand": "Meridian Rx Supply  |  Sales Order",
- "order": {"ref": "RX-1001", "date": "2026-10-06", "customer_id": "PH-20417", "currency": "USD"},
+ "order": {"ref": "RX-2001", "date": "2026-10-06", "customer_id": "PH-20417", "currency": "EUR"},
  "customer": {
   "company": "Harborview Pharmacy LLC", "alias": "HARBORVIEW-BOS", "contact": "Dana Whitfield",
   "email": "orders@harborview-pharmacy.example.com", "phone": "+1 617 555 0142",

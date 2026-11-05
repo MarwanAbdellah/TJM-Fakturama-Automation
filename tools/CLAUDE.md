@@ -13,5 +13,5 @@
   style, using rough.js and the embedded Kalam font (SIL OFL):
   `npm install && node make_diagrams.mjs`.
 
-Sample data is fictional: pharmacies and hospitals in the US and Canada, USD,
+Sample data is fictional: pharmacies and hospitals in the US and Canada, billed in EUR (USD before RX-2001),
 `example.com` e-mail addresses, and 555 phone numbers.

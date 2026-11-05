@@ -1,6 +1,6 @@
 {
  "brand": "Meridian Rx Supply  |  Sales Order",
- "order": {"ref": "RX-1002", "date": "2026-10-09", "customer_id": "PH-30882", "currency": "USD"},
+ "order": {"ref": "RX-2002", "date": "2026-10-09", "customer_id": "PH-30882", "currency": "EUR"},
  "customer": {
   "company": "Northgate Medical Distribution Inc", "alias": "NORTHGATE-TOR", "contact": "Priya Raman",
   "email": "purchasing@northgate-med.example.com", "phone": "+1 416 555 0187",

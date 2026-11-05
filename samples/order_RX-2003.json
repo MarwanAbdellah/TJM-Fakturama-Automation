@@ -1,6 +1,6 @@
 {
  "brand": "Meridian Rx Supply  |  Sales Order",
- "order": {"ref": "RX-1003", "date": "2026-10-20", "customer_id": "HS-11290", "currency": "USD"},
+ "order": {"ref": "RX-2003", "date": "2026-10-20", "customer_id": "HS-11290", "currency": "EUR"},
  "customer": {
   "company": "Lakeshore General Hospital", "alias": "LAKESHORE-CHI", "contact": "Marcus Oyelaran",
   "email": "pharmacy@lakeshore-general.example.com", "phone": "+1 312 555 0163",

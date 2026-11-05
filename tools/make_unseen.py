@@ -48,7 +48,7 @@ def truth(name, o):
     data = {
         "external_ref": o["ref"],
         "order_date": o["date"],
-        "currency": "USD",
+        "currency": "EUR",
         "company": o["company"],
         "contact": o["contact"],
         "billing": o["bill"],
@@ -106,7 +106,7 @@ def hospital_po():
             d.text((x, y + 36 + i * 32), t, font=font(24), fill=INK)
     d.text(
         (80, 520),
-        f"Requested by: {o['contact']}   ·   Terms: Net 30, wire / bank transfer   ·   Currency USD",
+        f"Requested by: {o['contact']}   ·   Terms: Net 30, wire / bank transfer   ·   Currency EUR",
         font=font(24),
         fill=INK,
     )
@@ -119,15 +119,15 @@ def hospital_po():
         yy = y + 70 + n * 60
         for x, t in zip(
             [c[0] for c in cols],
-            [str(it["qty"]), it["sku"], it["desc"], f"${it['unit']}", f"{it['vat']}%", f"${it['line']}"],
+            [str(it["qty"]), it["sku"], it["desc"], f"€{it['unit']}", f"{it['vat']}%", f"€{it['line']}"],
         ):
             d.text((x, yy), t, font=font(24), fill=INK)
         d.line((70, yy + 45, 1630, yy + 45), fill=LINE, width=1)
     yt = y + 70 + len(o["items"]) * 60 + 60
     for i, (lab, v) in enumerate((("Subtotal", net), ("Sales tax", vat), ("PO TOTAL", gross))):
         d.text((1180, yt + i * 46), lab, font=font(26, i == 2), fill=INK)
-        d.text((1440, yt + i * 46), f"${v}", font=font(26, i == 2), fill=INK)
-    d.text((80, 2080), "Authorized signature: ______________________     All amounts USD.", font=font(22), fill=GREY)
+        d.text((1440, yt + i * 46), f"€{v}", font=font(26, i == 2), fill=INK)
+    d.text((80, 2080), "Authorized signature: ______________________     All amounts EUR.", font=font(22), fill=GREY)
     img.save(OUT / "hospital_po.png")
 
 
@@ -190,7 +190,7 @@ def scanned_fax():
             font=font(24),
             fill=INK,
         )
-    d.text((70, y + 220), f"Net {net}    Tax {vat}    Total USD {gross}", font=font(26, True), fill=INK)
+    d.text((70, y + 220), f"Net {net}    Tax {vat}    Total EUR {gross}", font=font(26, True), fill=INK)
     img = img.rotate(1.6, expand=True, fillcolor=(246, 244, 238)).filter(ImageFilter.GaussianBlur(0.9))
     rnd = random.Random(7)
     px = img.load()
@@ -269,7 +269,7 @@ def distributor_form():
     yt = 680 + len(o["items"]) * 58 + 50
     d.text((1160, yt), f"Net amount      {net}", font=font(26), fill=INK)
     d.text((1160, yt + 44), f"Tax                  {vat}", font=font(26), fill=INK)
-    d.text((1160, yt + 88), f"Amount due USD {gross}", font=font(28, True), fill=INK)
+    d.text((1160, yt + 88), f"Amount due EUR {gross}", font=font(28, True), fill=INK)
     img.save(OUT / "distributor_form.png")
 
 
@@ -316,7 +316,7 @@ def letter_pdf():
         f"Re: our order {o['ref']}",
         "",
         "Please supply the items below to the address above. Contact: Grace Lindqvist.",
-        f"We paid the full amount of USD {gross} by bank transfer on November 5, 2026.",
+        f"We paid the full amount of EUR {gross} by bank transfer on November 5, 2026.",
     ]
     for i, t in enumerate(body):
         d.text((100, 340 + i * 40), t, font=font(26), fill=INK)
@@ -324,11 +324,11 @@ def letter_pdf():
     for n, it in enumerate(o["items"]):
         d.text(
             (100, y + n * 44),
-            f"• {it['qty']} x {it['desc']} ({it['sku']}) at ${it['unit']} = ${it['line']}  (tax {it['vat']}%)",
+            f"• {it['qty']} x {it['desc']} ({it['sku']}) at €{it['unit']} = €{it['line']}  (tax {it['vat']}%)",
             font=font(25),
             fill=INK,
         )
-    d.text((100, y + 140), f"Subtotal ${net}, tax ${vat}, total ${gross}.", font=font(26, True), fill=INK)
+    d.text((100, y + 140), f"Subtotal €{net}, tax €{vat}, total €{gross}.", font=font(26, True), fill=INK)
     d.text((100, y + 260), "Kind regards,", font=font(26), fill=INK)
     d.text((100, y + 300), "Grace Lindqvist, Director of Nursing", font=font(26), fill=INK)
     img.save(OUT / "letter_pdf.pdf", "PDF", resolution=200)

@@ -5,3 +5,8 @@ __pycache__/
 runs/
 *.egg-info/
 node_modules/
+
+# graphify: keep the graph and report, not its rebuildable cache
+graphify-out/cache/
+graphify-out/.graphify_*
+.env

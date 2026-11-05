@@ -25,7 +25,7 @@ def extract_draft(path: str | Path, ai: bool = False) -> Extraction:
     """Local OCR + label-anchored layout parsing. Deterministic and offline; never raises
     for an unreadable layout (returns ``error`` instead).
 
-    ``ai=True`` (explicit opt-in: it sends the image to Anthropic) asks Claude to read the
+    ``ai=True`` (explicit opt-in: it sends the image to an AI model) asks it to read the
     image when the parser fails or its draft does not pass ``check_order``."""
     image = as_image(Path(path))
     lines, _ = ocr_image(image)

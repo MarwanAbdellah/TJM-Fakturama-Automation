@@ -16,7 +16,9 @@ def main(argv: list[str] | None = None) -> int:
     e = sub.add_parser("extract", help="OCR + parse an order image, print JSON and validation result")
     e.add_argument("image", type=Path)
     e.add_argument(
-        "--ai", action="store_true", help="if the parser fails, let Claude read the image (sends it to Anthropic)"
+        "--ai",
+        action="store_true",
+        help="if the parser fails, let an AI model read the image (Gemini by default; sends it off this machine)",
     )
 
     r = sub.add_parser("run", help="full Order-first flow against the running Fakturama")
@@ -25,7 +27,9 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--run-dir", type=Path)
     r.add_argument("--resume", action="store_true", help="continue a stopped run whose Order is already saved")
     r.add_argument(
-        "--ai", action="store_true", help="if the parser fails, let Claude read the image (sends it to Anthropic)"
+        "--ai",
+        action="store_true",
+        help="if the parser fails, let an AI model read the image (Gemini by default; sends it off this machine)",
     )
 
     v = sub.add_parser("verify", help="read-only DB check of the documents for a Cust.Ref.")

@@ -9,12 +9,11 @@ dependencies = [
     "pillow>=10",
     "pydantic>=2.12",
     "pypdfium2>=5.14.0",
+    "python-dotenv>=1.2.4",
     "pywinauto>=0.6.9",
+    "requests>=2.32",
     "streamlit>=1.40",
 ]
-
-[project.optional-dependencies]
-llm = ["anthropic>=2.5"]
 
 [project.scripts]
 image2cash = "image2cash.cli:main"

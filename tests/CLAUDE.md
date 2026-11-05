@@ -10,6 +10,6 @@ These are unit tests only: they never start or drive Fakturama. Run them with
 | `test_rules.py` | Business rules: `sku_eq`/`ocr_eq`, the line-position rule, currency guard, preflight idempotency, `close`, catalogue-price confirmation. |
 | `test_ui_helpers.py` | Pure UI helpers: date parsing, grid separators, column naming, netstat parsing. |
 | `test_flow.py` | Exit codes. Only a held lock is "busy"; a missing Fakturama is "failed". Also that the run log is written. |
-| `test_vision.py` | The opt-in AI fallback against a mock HTTP transport: request shape, parsing, refusal, and that it runs only when asked and only when the parser fails. Skipped without the `llm` extra. |
+| `test_vision.py` | The opt-in AI fallback with a fake HTTP post: request shape, parsing, API errors, and that it runs only when asked and only when the parser fails. |
 
 A new business rule gets a small pure function and a parametrized case here.

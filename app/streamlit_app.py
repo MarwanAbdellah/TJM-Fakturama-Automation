@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import sys
 from datetime import datetime
@@ -110,9 +111,7 @@ def review_form(d: dict, k: str) -> dict:
 
     st.subheader("Items")
     cols = ["pos", "sku", "description", "qty", "unit", "unit_net", "discount_pct", "vat_pct", "line_net"]
-    edited = st.data_editor(
-        pd.DataFrame(d["items"])[cols], num_rows="dynamic", use_container_width=True, key=k + "items"
-    )
+    edited = st.data_editor(pd.DataFrame(d["items"])[cols], num_rows="dynamic", width="stretch", key=k + "items")
     d["items"] = [
         {kk: (None if pd.isna(v) else str(v) if kk not in ("pos",) else int(v)) for kk, v in row.items()}
         for row in edited.to_dict("records")
@@ -179,8 +178,13 @@ def start(draft: OrderDraft, resume: bool = False, run_dir: Path | None = None) 
     order_json = run_dir / "draft.json"
     order_json.write_text(draft.model_dump_json(indent=1), encoding="utf-8")
     cmd = [sys.executable, "-m", "image2cash.cli", "run", "--draft", str(order_json), "--run-dir", str(run_dir)]
+    log = open(run_dir / "output.log", "ab")  # the run's console: errors before run.json exists land here
     st.session_state.proc = subprocess.Popen(
-        cmd + (["--resume"] if resume else []), creationflags=subprocess.CREATE_NO_WINDOW
+        cmd + (["--resume"] if resume else []),
+        stdout=log,
+        stderr=subprocess.STDOUT,
+        env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONWARNINGS": "ignore"},
+        creationflags=subprocess.CREATE_NO_WINDOW,
     )
     st.session_state.run_dir = run_dir
 
@@ -199,6 +203,10 @@ def show_run(run_dir: Path, code: int | None) -> None:
     else:
         text, kind = EXIT.get(code, (f"exit {code}", "error"))
         getattr(st, kind)(text)
+        out = run_dir / "output.log"
+        if code != 0 and out.exists():
+            with st.expander("Run output (last 40 lines)", expanded=not log):
+                st.code("\n".join(out.read_text(encoding="utf-8", errors="replace").splitlines()[-40:]))
     if not log:
         st.caption("Waiting for the first step...")
         return
@@ -236,7 +244,7 @@ def show_run(run_dir: Path, code: int | None) -> None:
                 for s in steps
             ]
         ),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
     shots = sorted((run_dir / "screenshots").glob("*.png"))
@@ -314,7 +322,7 @@ with left:
     legend = " ".join(f"<span style='color:{c}'>■ {n}</span>" for n, c in dict(SECTIONS.values()).items())
     st.markdown(legend, unsafe_allow_html=True)
     focus = st.selectbox("Highlight a field", ["(none)"] + sorted(boxes), key=sha + "focus")
-    st.image(annotate(str(path), boxes, None if focus == "(none)" else focus), use_container_width=True)
+    st.image(annotate(str(path), boxes, None if focus == "(none)" else focus), width="stretch")
 if error:
     right.error(f"Could not read this image as an order: {error}")
     st.stop()

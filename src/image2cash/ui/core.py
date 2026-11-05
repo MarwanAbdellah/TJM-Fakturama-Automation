@@ -51,6 +51,11 @@ class UI:
     def __post_init__(self):
         from pywinauto.application import Application
 
+        # A minimized window counts as invisible to UIA, so restore it first (win32 still sees it).
+        w32 = Application(backend="win32").connect(title_re=MAIN_TITLE, timeout=15).window(title_re=MAIN_TITLE)
+        if w32.is_minimized():
+            w32.restore()
+            time.sleep(1)
         self.uia_app = Application(backend="uia").connect(title_re=MAIN_TITLE, timeout=15)
         self.main = self.uia_app.window(title_re=MAIN_TITLE).wrapper_object()
         self.w32_app = Application(backend="win32").connect(process=self.main.process_id())

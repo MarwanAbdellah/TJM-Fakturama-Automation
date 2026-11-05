@@ -1,6 +1,6 @@
 # Diagrams (hand-drawn)
 
-Generated with rough.js. To regenerate:
+Hand-drawn in the style of [Sketchy](https://github.com/ddkbs/sketchy), generated with rough.js and the embedded Kalam font (SIL OFL, `tools/diagrams/fonts/`). To regenerate:
 `cd tools/diagrams && npm install && node make_diagrams.mjs`
 
 ## Architecture

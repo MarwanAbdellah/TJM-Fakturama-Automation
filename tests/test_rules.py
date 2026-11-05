@@ -74,3 +74,28 @@ def test_preflight_never_duplicates(monkeypatch, docs, resume, outcome):
     else:
         order.preflight(ctx)
         assert (ctx.resume_at == "invoice") is (outcome == "resume")
+
+
+def test_close_allows_one_cent_per_line():
+    from decimal import Decimal as D
+
+    from image2cash.validate import close
+
+    assert close(D("348.52"), D("348.48"), 8)  # 4 cents over 8 lines
+    assert not close(D("348.52"), D("348.48"), 2)
+    assert not close(None, D("1"), 1)
+
+
+def test_catalogue_price_is_confirmed_not_overwritten():
+    from decimal import Decimal as D
+
+    from image2cash.models import Item
+    from image2cash.steps.product import _check_master
+
+    item = Item(
+        pos=1, sku="OTC-GLV-N100", description="x", qty=D(40), unit_net=D("9.90"), vat_pct=D("6.25"), line_net=D("396")
+    )
+    row = {"vat_value": 0.0625, "vat_name": "VAT 6.25%", "price": 9.901176470588235}  # entered as gross 10.52
+    _check_master(None, item, row)  # rounds to 9.90: same price
+    with pytest.raises(ManualReview, match="catalogue net price 10.50"):
+        _check_master(None, item, {**row, "price": 10.5})

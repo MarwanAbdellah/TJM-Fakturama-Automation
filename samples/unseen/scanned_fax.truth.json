@@ -1,0 +1,47 @@
+{
+ "external_ref": "CL-7781",
+ "order_date": "2026-10-29",
+ "currency": "USD",
+ "company": "Maple Grove Family Clinic",
+ "contact": "Dr. Sofia Ruiz",
+ "billing": [
+  "Maple Grove Family Clinic",
+  "77 Elm Street",
+  "Burlington, VT 05401",
+  "United States"
+ ],
+ "delivery": [
+  "Maple Grove Family Clinic",
+  "77 Elm Street",
+  "Burlington, VT 05401",
+  "United States"
+ ],
+ "payment": {
+  "method": "Credit Card",
+  "status": "PAID",
+  "paid_date": "2026-10-30"
+ },
+ "items": [
+  {
+   "sku": "NDC-0093-4155",
+   "desc": "Amoxicillin 500 mg caps 100ct",
+   "qty": "4",
+   "unit": "18.40",
+   "disc": "0",
+   "vat": "0",
+   "line": "73.60"
+  },
+  {
+   "sku": "OTC-ALC-PAD",
+   "desc": "Alcohol Prep Pads 200",
+   "qty": "10",
+   "unit": "4.15",
+   "disc": "0",
+   "vat": "6.25",
+   "line": "41.50"
+  }
+ ],
+ "net_total": "115.10",
+ "vat_total": "2.59",
+ "gross_total": "117.69"
+}

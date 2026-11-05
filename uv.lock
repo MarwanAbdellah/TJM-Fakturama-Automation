@@ -314,6 +314,7 @@ dependencies = [
     { name = "jaydebeapi" },
     { name = "pillow" },
     { name = "pydantic" },
+    { name = "pypdfium2" },
     { name = "pywinauto" },
     { name = "streamlit" },
 ]
@@ -332,11 +333,12 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "anthropic", marker = "extra == 'llm'", specifier = ">=0.70" },
+    { name = "anthropic", marker = "extra == 'llm'", specifier = ">=2.5" },
     { name = "indra-ocr", specifier = ">=1.1.2" },
     { name = "jaydebeapi", specifier = ">=1.2.3" },
     { name = "pillow", specifier = ">=10" },
     { name = "pydantic", specifier = ">=2.12" },
+    { name = "pypdfium2", specifier = ">=5.14.0" },
     { name = "pywinauto", specifier = ">=0.6.9" },
     { name = "streamlit", specifier = ">=1.40" },
 ]

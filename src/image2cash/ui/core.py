@@ -12,12 +12,18 @@ Every rectangle used for a click comes from the live UIA tree in this run.
 
 from __future__ import annotations
 
+import logging
+import re
+import subprocess
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-MAIN_TITLE = "Fakturama - .*"
+from image2cash import config
+
+MAIN_TITLE = "Fakturama - " + re.escape(str(config.WORKDIR)) + "$"
+log = logging.getLogger("image2cash.ui")
 
 
 class AutomationError(RuntimeError):
@@ -39,7 +45,44 @@ def wait_for(predicate: Callable[[], object], timeout: float = 10, interval: flo
         except Exception as exc:  # control not there yet
             last_exc = exc
         time.sleep(interval)
+    log.debug("timed out after %ss waiting for %s (%s)", timeout, what or predicate, last_exc or "")
     raise AutomationError(f"timed out waiting for {what or predicate}: {last_exc or ''}")
+
+
+def listener_pid(netstat: str, port: int) -> int | None:
+    """PID listening on ``port`` in `netstat -ano` output."""
+    for line in netstat.splitlines():
+        parts = line.split()
+        if len(parts) >= 5 and parts[0] == "TCP" and parts[1].endswith(f":{port}") and parts[3] == "LISTENING":
+            return int(parts[4])
+    return None
+
+
+def target_instance() -> int:
+    """PID of the Fakturama window for config.WORKDIR, and only if that same process serves
+    the database we read. Two Fakturama instances (test + live) cannot both own port 9001,
+    and reading one while driving the other would verify the wrong data."""
+    from pywinauto import Desktop
+
+    pids = {
+        w.process_id()
+        for w in Desktop(backend="win32").windows(visible_only=False)
+        if w.class_name() == "SWT_Window0" and re.match(MAIN_TITLE, w.window_text())
+    }
+    if not pids:
+        raise AutomationError(
+            f"Fakturama for {config.WORKDIR} is not open. Start it with: "
+            f'"{config.FAKTURAMA_EXE}" -data "{config.WORKSPACE}"'
+        )
+    port = int(re.search(r":(\d+)/", config.HSQL_URL)[1])
+    out = subprocess.run(["netstat", "-ano", "-p", "TCP"], capture_output=True, text=True, timeout=10).stdout
+    owner = listener_pid(out, port)
+    if owner not in pids:
+        raise AutomationError(
+            f"The database on port {port} belongs to another program (pid {owner}), not to Fakturama for "
+            f"{config.WORKDIR}. Close the other Fakturama, then restart the one for {config.WORKDIR}."
+        )
+    return owner
 
 
 @dataclass
@@ -51,12 +94,13 @@ class UI:
     def __post_init__(self):
         from pywinauto.application import Application
 
+        pid = target_instance()
         # A minimized window counts as invisible to UIA, so restore it first (win32 still sees it).
-        w32 = Application(backend="win32").connect(title_re=MAIN_TITLE, timeout=15).window(title_re=MAIN_TITLE)
+        w32 = Application(backend="win32").connect(process=pid).window(title_re=MAIN_TITLE)
         if w32.is_minimized():
             w32.restore()
             time.sleep(1)
-        self.uia_app = Application(backend="uia").connect(title_re=MAIN_TITLE, timeout=15)
+        self.uia_app = Application(backend="uia").connect(process=pid)
         self.main = self.uia_app.window(title_re=MAIN_TITLE).wrapper_object()
         self.w32_app = Application(backend="win32").connect(process=self.main.process_id())
         self.w32 = self.w32_app.window(handle=self.main.handle)
@@ -85,6 +129,7 @@ class UI:
 
     def dialog(self, title: str, timeout: float = 10):
         """A modal dialog (child top-level window of Fakturama) by title."""
+        log.debug("wait for dialog %r", title)
 
         def probe():
             for c in self.main.children():
@@ -186,11 +231,15 @@ class UI:
 
     # ---- actions -----------------------------------------------------------
     def click(self, ctrl, double: bool = False) -> None:
+        log.debug(
+            "%s %s %r", "double-click" if double else "click", ctrl.element_info.control_type, ctrl.element_info.name
+        )
         self.focus()
         ctrl.click_input(double=double)
 
     def press(self, name: str, control_type: str = "Button", root=None) -> None:
         ctrl = self.find(name, control_type, root=root)
+        log.debug("press %s %r", control_type, name)
         try:
             ctrl.invoke()
         except Exception:
@@ -206,6 +255,7 @@ class UI:
         """
         from pywinauto.keyboard import send_keys
 
+        log.debug("type %r into %r", text, ctrl.element_info.name)
         self.focus()
         ctrl.click_input()
         send_keys("^a{BACKSPACE}", pause=0.02)
@@ -270,6 +320,7 @@ class UI:
         stripped = [i.strip() for i in items]
         if text.strip() not in stripped:
             raise ManualReview(f"{text!r} not in combo options {items}")
+        log.debug("select %r in combo %r", text.strip(), uia_combo.element_info.name)
         combo.select(stripped.index(text.strip()))
         # SWT listens for CBN_SELCHANGE which select() sends; confirm.
         wait_for(lambda: (combo.selected_text() or "").strip() == text.strip(), 3, what=f"combo -> {text}")
@@ -334,6 +385,7 @@ class UI:
 
     def save(self) -> None:
         """Toolbar Save (brief: 'click the toolbar Save control once')."""
+        log.info("save %r", self.active_editor())
         self.press("Save the current contents")
         time.sleep(1.2)
 
@@ -368,6 +420,7 @@ class UI:
     def activate_editor(self, title: str | Callable[[str], bool]) -> str:
         match = title if callable(title) else (lambda t: t.lstrip("*") == title)
         folder = self._editor_folder()
+        log.debug("activate editor (open: %s)", self.editor_tabs())
         for c in folder.children():
             if c.element_info.control_type == "TabItem" and match(c.element_info.name):
                 self.click(c)
@@ -396,6 +449,7 @@ class UI:
 
     def nav(self, name: str) -> None:
         """Click a link in the left navigation view (Data / New / Miscellaneous)."""
+        log.debug("navigate to %r", name)
         nav = self.find("Navigation View", "Pane")
         self.click(self.find(name, "Text", root=nav))
         time.sleep(1)

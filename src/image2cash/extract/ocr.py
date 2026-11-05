@@ -41,11 +41,33 @@ def _engine():
     return indra_ocr.load(threads=4, dpi=200, mode="ocr")
 
 
+def pdf_to_png(pdf: Path, png: Path, dpi: int = 200) -> int:
+    """Render page 1 of ``pdf`` to ``png``; returns the PDF's page count (one order per image)."""
+    import pypdfium2 as pdfium
+
+    doc = pdfium.PdfDocument(str(pdf))
+    try:
+        doc[0].render(scale=dpi / 72).to_pil().convert("RGB").save(png)
+        return len(doc)
+    finally:
+        doc.close()
+
+
+def as_image(path: Path) -> Path:
+    """PDFs become a PNG next to them (page 1); images pass through."""
+    if path.suffix.lower() != ".pdf":
+        return path
+    png = path.with_suffix(".page1.png")
+    if not png.exists() or png.stat().st_mtime < path.stat().st_mtime:
+        pdf_to_png(path, png)
+    return png
+
+
 def ocr_image(path: str | Path) -> tuple[list[Line], tuple[int, int]]:
-    """OCR one image. Returns lines (in image pixels) and the image size."""
+    """OCR one image (a PDF is rendered to PNG first). Returns lines in image pixels and the size."""
     from PIL import Image
 
-    path = Path(path)
+    path = as_image(Path(path))
     with Image.open(path) as img:
         size = img.size
     for _, page in _engine().convert(str(path), max_pages=1):

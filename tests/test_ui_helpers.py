@@ -68,3 +68,18 @@ def test_prefix_match_for_truncated_cells():
     assert prefix_match("Northstar Office GmbH", "Northstar Office GmbH")
     assert not prefix_match("Northstar Offic...", "Southstar Office GmbH")
     assert not prefix_match("", "x")
+
+
+def test_listener_pid_reads_netstat():
+    from image2cash.ui.core import listener_pid
+
+    out = """
+  Proto  Local Address          Foreign Address        State           PID
+  TCP    0.0.0.0:8501           0.0.0.0:0              LISTENING       69372
+  TCP    0.0.0.0:9001           0.0.0.0:0              LISTENING       176348
+  TCP    127.0.0.1:59001        0.0.0.0:0              LISTENING       1234
+  TCP    127.0.0.1:9001         127.0.0.1:50000        ESTABLISHED     999
+"""
+    assert listener_pid(out, 9001) == 176348
+    assert listener_pid(out, 59001) == 1234
+    assert listener_pid(out, 9002) is None

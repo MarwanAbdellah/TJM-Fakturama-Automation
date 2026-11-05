@@ -8,7 +8,7 @@ from decimal import Decimal
 from image2cash.steps.context import Ctx
 from image2cash.ui.core import AutomationError, ManualReview, read, wait_for
 from image2cash.ui.datefield import set_date
-from image2cash.validate import money, parse_amount, totals
+from image2cash.validate import close, money, parse_amount, totals
 from image2cash.verify import db
 
 # shortcut: sign -> ISO code for the locales seen so far; extend when another currency shows up.
@@ -52,6 +52,12 @@ def open_order(ctx: Ctx) -> None:
     wait_for(lambda: ui.active_editor().lstrip("*") == "New Order", 10, what="New Order editor")
     ed = ui.editor_pane()
 
+    total = ui.labelled("Total", "Edit", root=ed)
+    ui.learn_locale(read(total))
+    booked = booked_currency(read(total))
+    if booked and booked != o.currency:  # stop before typing anything into the new Order
+        raise ManualReview(f"order is in {o.currency}, Fakturama books in {booked}")
+
     no = ui.labelled("No.", "Edit", root=ed)
     ctx.order_no = read(no)  # 1.4: leave the proposed number unchanged
     if not ctx.order_no:
@@ -72,11 +78,6 @@ def open_order(ctx: Ctx) -> None:
     if ui.combo_value(vat).strip() != "With VAT":
         ui.combo_select(vat, "With VAT")
 
-    total = ui.labelled("Total", "Edit", root=ed)
-    ui.learn_locale(read(total))
-    booked = booked_currency(read(total))
-    if booked and booked != o.currency:
-        raise ManualReview(f"order is in {o.currency}, Fakturama books in {booked}")
     # More rows visible before the item table needs its own scrollbar.
     maxi = [b for b in ui._editor_folder().descendants(control_type="Button") if b.element_info.name == "Maximize"]
     if maxi:
@@ -132,7 +133,7 @@ def complete_and_save(ctx: Ctx) -> None:
     problems = [
         f"{k}: UI {got[k]} vs source {want}"
         for k, want in (("net", o.net_total), ("vat", o.vat_total), ("total", o.gross_total))
-        if got[k] is None or money(got[k]) != money(want)
+        if not close(got[k], want, len(o.items))
     ]
     shot = ctx.shot("order_complete")
     if problems:
@@ -171,7 +172,7 @@ def verify_saved_order(ctx: Ctx) -> None:
     checks = {
         "number": d["number"] == ctx.order_no,
         "date": d["date"] == o.order_date.isoformat(),
-        "total": money(d["total"]) == o.gross_total,
+        "total": close(d["total"], o.gross_total, len(o.items)),
         "items": len(items) == len(o.items),
     }
     for src, it in zip(o.items, items):

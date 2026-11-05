@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from decimal import Decimal
 
@@ -11,24 +12,28 @@ from image2cash.steps.context import Ctx
 from image2cash.steps.order import read_totals
 from image2cash.ui import grid as G
 from image2cash.ui.core import AutomationError, ManualReview, read, wait_for
-from image2cash.validate import gross_price, line_net, money, parse_amount, vat_name
+from image2cash.validate import close, gross_price, line_net, money, parse_amount, vat_name
 from image2cash.verify import db
 
 SELECT_HEADERS = ["Item No.", "Name", "Description", "Stock", "Price", "VAT"]
 ITEM_HEADERS = ["Pos.", "Qty.", "Item No.", "Picture", "Name", "Description", "VAT", "U.Price", "Discount", "Price"]
 TITLE = "Select a product"
+log = logging.getLogger("image2cash.product")
 
 
 def all_items(ctx: Ctx) -> None:
     for item in ctx.order.items:  # 3.1 / 3.17, in source order
-        select_or_create(ctx, item)
-        complete_line(ctx, item)
+        found = select_or_create(ctx, item)
+        complete_line(ctx, item, found)
 
 
-def select_or_create(ctx: Ctx, item: Item) -> None:
+def select_or_create(ctx: Ctx, item: Item) -> tuple[G.Grid, G.Row]:
+    """Put the item on a new Order line; returns the grid read and row that proved it."""
     rows = db.products_with_sku(item.sku)
     if len(rows) > 1:
         raise ManualReview(f"{len(rows)} products with SKU {item.sku}")
+    if rows:
+        _check_master(ctx, item, rows[0])  # before the line exists: a mismatch leaves no dirty line
     pos = ctx.order.items.index(item) + 1  # the Order is new, so line n has Pos. n
     dialog, icon = S.open_selector(ctx, "Items", TITLE)  # 3.2
     grid = S.search(ctx, dialog, item.sku, SELECT_HEADERS)  # 3.3
@@ -47,12 +52,12 @@ def select_or_create(ctx: Ctx, item: Item) -> None:
         ctx.record(f"3.3 product {item.sku}", "missing", rows_seen=len(grid.rows), shot=shot)
         create(ctx, item)
         return reselect(ctx, item, pos)
-    _check_new_row(ctx, item, pos)
-    _check_master(ctx, item, rows[0])
+    found = _check_new_row(ctx, item, pos)
     ctx.record(f"3.3 product {item.sku}", "ok", how=how, product=rows[0]["id"], shot=shot)
+    return found
 
 
-def reselect(ctx: Ctx, item: Item, pos: int) -> None:
+def reselect(ctx: Ctx, item: Item, pos: int) -> tuple[G.Grid, G.Row]:
     """3.12: pick the newly saved product from the still-open Order."""
     rows = db.products_with_sku(item.sku)
     if len(rows) != 1:
@@ -61,8 +66,9 @@ def reselect(ctx: Ctx, item: Item, pos: int) -> None:
     grid = S.search(ctx, dialog, item.sku, SELECT_HEADERS)
     if grid is not None:
         S.pick(ctx, dialog, grid, lambda r: sku_eq(r.get("Item No."), item.sku), "Item No.")
-    _check_new_row(ctx, item, pos)
+    found = _check_new_row(ctx, item, pos)
     ctx.record(f"3.12 product {item.sku} reselected", "ok", product=rows[0]["id"])
+    return found
 
 
 def _items_grid(ctx: Ctx):
@@ -130,23 +136,33 @@ def is_line(pos: int, seen: int | None, above: int | None, has_above: bool) -> b
     return (pos == 1 and not has_above) or (has_above and above == pos - 1)
 
 
-def _check_new_row(ctx: Ctx, item: Item, pos: int) -> None:
+def _check_new_row(ctx: Ctx, item: Item, pos: int) -> tuple[G.Grid, G.Row]:
     def probe():
         g, row = last_line(ctx)
         above = [x for x in g.rows if x.get("Item No.") and x.y < row.y]
-        return row if is_line(pos, _row_pos(row), _row_pos(above[-1]) if above else None, bool(above)) else None
+        ok = is_line(pos, _row_pos(row), _row_pos(above[-1]) if above else None, bool(above))
+        return (g, row) if ok else None
 
-    row = wait_for(probe, 8, what=f"Order line {pos} for {item.sku}")
+    g, row = wait_for(probe, 8, what=f"Order line {pos} for {item.sku}")
     if not sku_eq(row.get("Item No."), item.sku):
         raise ManualReview(f"Order line {pos} shows {row.get('Item No.')!r}, expected {item.sku}")
+    return g, row
 
 
 def _check_master(ctx: Ctx, item: Item, row: dict) -> None:
-    """An existing product's VAT must equal the source VAT (lines inherit it)."""
+    """Brief 3.14 'confirm': the catalogue owns price and VAT. The order line inherits
+    both and is never overwritten; a different image price stops for a human, who
+    changes the product in Fakturama if the price really changed."""
     if row["vat_value"] is None or abs(Decimal(str(row["vat_value"])) * 100 - item.vat_pct) > Decimal("0.001"):
         raise ManualReview(
             f"product {item.sku} has VAT {row['vat_name']}, source says {item.vat_pct}%"
             " (line VAT override not automated)"
+        )
+    catalogue = None if row["price"] is None else money(Decimal(str(row["price"])))
+    if catalogue != item.unit_net:
+        raise ManualReview(
+            f"product {item.sku}: catalogue net price {catalogue} differs from the order's {item.unit_net}."
+            " Prices live in the product catalogue: update the product in Fakturama, or correct the order."
         )
 
 
@@ -226,15 +242,26 @@ def create(ctx: Ctx, item: Item) -> None:
 
 
 # ---------------------------------------------------------------------------
-def complete_line(ctx: Ctx, item: Item) -> None:
-    """3.13-3.16: Qty, U.Price, Discount on the item's row; verify by totals."""
+def complete_line(ctx: Ctx, item: Item, found: tuple[G.Grid, G.Row] | None = None) -> None:
+    """3.13-3.16: Qty and Discount on the item's row; U.Price is the catalogue's (confirmed
+    in _check_master, never typed). Verified by the running Total Net.
+
+    Speed: a cell that already shows the wanted value is not edited (new lines start at
+    Qty 1 and Discount 0), the first edit reuses the read that proved the line, and the
+    row is re-read (with its SKU) only before a second edit.
+    """
     from pywinauto import mouse
     from pywinauto.keyboard import send_keys
 
     ui = ctx.ui
+    done = ctx.order.items[: ctx.order.items.index(item) + 1]
+    want_net = money(sum((line_net(i.qty, i.unit_net, i.discount_pct) for i in done), Decimal(0)))
+    edits = [("Qty.", item.qty, Decimal(1)), ("Discount", item.discount_pct, Decimal(0))]
+    edits = [(col, value) for col, value, default in edits if value != default]
 
-    def edit_cell(col: str, value: str) -> None:
-        g, row = last_line(ctx)  # re-locate before every edit: Enter can move the table
+    ctx.back_to_order()
+    for n, (col, value) in enumerate(edits):
+        g, row = found if (n == 0 and found) else last_line(ctx)
         if not sku_eq(row.get("Item No."), item.sku):
             raise ManualReview(f"bottom Order line shows {row.get('Item No.')!r}, expected {item.sku}")
         x = g.column_x(col)
@@ -242,25 +269,24 @@ def complete_line(ctx: Ctx, item: Item) -> None:
             raise AutomationError(f"item column {col!r} not located (have {g.headers})")
         ui.focus()
         mouse.double_click(coords=(int(x), int(row.y)))
-        time.sleep(0.4)
+        time.sleep(0.3)
         send_keys("^a")
-        send_keys(value, pause=0.02)
+        send_keys(ui.amount_text(value, sep="."), pause=0.02)  # grid cells take '.' whatever the locale
         send_keys("{ENTER}")
-        time.sleep(0.6)
+        time.sleep(0.5)
 
-    # Grid cells parse '.' whatever the UI locale (calibrated); form fields do not.
-    edit_cell("Qty.", ui.amount_text(item.qty, sep="."))
-    edit_cell("U.Price", ui.amount_text(item.unit_net, sep="."))  # 3.14 overwrite: never trust gross->net rounding
-    edit_cell("Discount", ui.amount_text(item.discount_pct, sep="."))
+    def net_ok():
+        t = read_totals(ctx)
+        return t if close(t.get("net"), want_net, len(done)) else None
 
-    # 3.16 verified through the UIA totals: running net == sum of lines so far
-    done = ctx.order.items[: ctx.order.items.index(item) + 1]
-    want_net = money(sum((line_net(i.qty, i.unit_net, i.discount_pct) for i in done), Decimal(0)))
-    got = wait_for(
-        lambda: (lambda t: t if t.get("net") is not None and money(t["net"]) == want_net else None)(read_totals(ctx)),
-        5,
-        what=f"Total Net {want_net} after line {item.sku}",
-    )
+    try:
+        got = wait_for(net_ok, 5, what=f"Total Net {want_net} after line {item.sku}")
+    except AutomationError as exc:
+        raise ManualReview(
+            f"line {item.sku}: Order Total Net is {read_totals(ctx).get('net')}, expected {want_net}"
+        ) from exc
+    if money(got["net"]) != want_net:
+        ctx.warnings.append(f"after line {item.sku}: Total Net {got['net']} vs image {want_net} (catalogue rounding)")
     ctx.record(
         f"3.16 line {item.sku}",
         "ok",

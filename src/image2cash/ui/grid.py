@@ -7,6 +7,7 @@ y-clustering OCR lines and columns are assigned by header x-spans.
 
 from __future__ import annotations
 
+import logging
 import tempfile
 import time
 from dataclasses import dataclass
@@ -14,6 +15,8 @@ from pathlib import Path
 
 from image2cash.extract.ocr import Line, ocr_pil
 from image2cash.ui.core import AutomationError
+
+log = logging.getLogger("image2cash.grid")
 
 _SCRATCH = Path(tempfile.gettempdir()) / "image2cash_grid.png"
 
@@ -224,6 +227,7 @@ def read_grid(rect, header_names: list[str], owner=None) -> Grid:
             cells[name] = (cells.get(name, "") + " " + l.text).strip()
             boxes.setdefault(name, (l.cx, l.cy))
         rows.append(Row(sum(l.cy for l in cl) / len(cl), cells, boxes))
+    log.debug("grid read: columns %s, %d rows: %s", [n for n, _, _ in spans], len(rows), [r.cells for r in rows][:12])
     return Grid(
         (rect.left, rect.top, rect.right, rect.bottom),
         [n for n, _, _ in spans],

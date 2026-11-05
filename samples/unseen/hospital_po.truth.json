@@ -1,0 +1,54 @@
+{
+ "external_ref": "PO-HSP-55120",
+ "order_date": "2026-11-02",
+ "currency": "USD",
+ "company": "St. Brigid Regional Medical Center",
+ "contact": "Alan Okafor",
+ "billing": [
+  "St. Brigid Regional Medical Center",
+  "Accounts Payable",
+  "400 Lakeview Ave",
+  "Cleveland, OH 44114",
+  "United States"
+ ],
+ "delivery": [
+  "St. Brigid Central Pharmacy",
+  "Dock 3, 410 Lakeview Ave",
+  "Cleveland, OH 44114",
+  "United States"
+ ],
+ "payment": {
+  "method": "Bank Transfer",
+  "status": "UNPAID",
+  "paid_date": null
+ },
+ "items": [
+  {
+   "sku": "NDC-0409-4888",
+   "desc": "Sodium Chloride 0.9% 1000 mL",
+   "qty": "120",
+   "unit": "3.85",
+   "vat": "0",
+   "line": "462.00"
+  },
+  {
+   "sku": "NDC-63323-262",
+   "desc": "Ondansetron 2 mg/mL 2 mL vial",
+   "qty": "50",
+   "unit": "1.95",
+   "vat": "0",
+   "line": "97.50"
+  },
+  {
+   "sku": "OTC-MSK-N95",
+   "desc": "N95 Respirator, box of 20",
+   "qty": "30",
+   "unit": "18.40",
+   "vat": "5.75",
+   "line": "552.00"
+  }
+ ],
+ "net_total": "1111.50",
+ "vat_total": "31.74",
+ "gross_total": "1143.24"
+}

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -10,6 +11,9 @@ from typing import Any
 
 from image2cash.models import OrderDraft
 from image2cash.ui.core import UI
+
+log = logging.getLogger("image2cash.steps")
+_LEVEL = {"FAIL": logging.ERROR, "REVIEW": logging.WARNING, "start": logging.DEBUG}
 
 
 @dataclass
@@ -28,11 +32,16 @@ class Ctx:
     def record(self, step: str, status: str, **details: Any) -> None:
         entry = {"t": round(time.time(), 2), "step": step, "status": status, **details}
         self.steps.append(entry)
-        print(f"[{status:>6}] {step}: " + ", ".join(f"{k}={v}" for k, v in details.items() if k != "shot"))
+        text = ", ".join(f"{k}={v}" for k, v in details.items() if k not in ("shot", "trace"))
+        log.log(_LEVEL.get(status, logging.INFO), "[%6s] %s: %s", status, step, text)
         self.flush()
 
     def shot(self, name: str, boxes=None) -> str | None:
-        p = self.ui.screenshot(name, boxes)
+        try:
+            p = self.ui.screenshot(name, boxes)
+        except Exception as exc:  # noqa: BLE001 - e.g. Fakturama's window is gone; the record matters more
+            log.warning("screenshot %r failed: %s", name, exc)
+            return None
         return str(p) if p else None
 
     def flush(self) -> None:
@@ -75,6 +84,7 @@ class Ctx:
 
         from pywinauto import mouse
 
+        from image2cash.steps import selector as S
         from image2cash.ui import grid as G
         from image2cash.ui.core import AutomationError, wait_for
 
@@ -86,11 +96,15 @@ class Ctx:
             raise AutomationError("Documents tree has no 'Orders' node")
         ui.click(orders[0])
         _t.sleep(1)
+        # The list only shows what fits on screen; filter it to this order first.
+        G.search_edit(panel).click_input()
+        S._paste(self.order_no)
+        _t.sleep(1.2)
         pane = G.grid_below_search(panel)
         g = G.read_stable(
             pane.rectangle(), ["Document", "Date", "Name", "Cust.Ref.", "State", "Total", "Printed"], owner=ui.main
         )
-        rows = [r for r in g.rows if r.get("Document") == self.order_no]
+        rows = [r for r in g.rows if S.ocr_eq(r.get("Document"), self.order_no)]
         if len(rows) != 1:
             raise AutomationError(f"order {self.order_no} not found in the Documents list")
         x, y = rows[0].boxes["Document"]

@@ -12,5 +12,8 @@ HSQL_PASSWORD = os.getenv("HSQL_PASSWORD", "")
 
 # Eclipse workspace (-data) the automation is meant to run against. Use a copy.
 WORKSPACE = Path(os.getenv("FAKTURAMA_WORKSPACE", r"C:\Users\kimi\.fakturama2_test"))
+# Fakturama's working directory for that workspace. Its window is titled 'Fakturama - <WORKDIR>'
+# and only that window is ever driven (another open Fakturama, e.g. the live one, is left alone).
+WORKDIR = Path(os.getenv("FAKTURAMA_WORKDIR", r"D:\Fakturama_Test_Working"))
 
 RUNS_DIR = Path(os.getenv("IMAGE2CASH_RUNS", Path(__file__).resolve().parents[2] / "runs"))

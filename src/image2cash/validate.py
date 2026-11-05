@@ -18,6 +18,12 @@ def money(value: Decimal) -> Decimal:
     return value.quantize(CENT, rounding=ROUND_HALF_UP)
 
 
+def close(a: Decimal | None, b: Decimal, lines: int) -> bool:
+    """Equal within 1 cent per order line. Catalogue prices entered as rounded gross
+    (brief 3.9) store a net with a small remainder, so booked totals can drift by cents."""
+    return a is not None and abs(money(Decimal(a)) - money(Decimal(b))) <= CENT * max(1, lines)
+
+
 def line_net(qty: Decimal, unit_net: Decimal, discount_pct: Decimal) -> Decimal:
     """Brief 3.16: quantity x unit net price x (1 - discount / 100)."""
     return money(qty * unit_net * (1 - discount_pct / 100))

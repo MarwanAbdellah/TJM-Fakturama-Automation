@@ -1,0 +1,65 @@
+{
+ "external_ref": "NG-ORD-2026-0419",
+ "order_date": "2026-11-04",
+ "currency": "USD",
+ "company": "Prairie Wellness Pharmacy Ltd",
+ "contact": "Ethan Moreau",
+ "billing": [
+  "Prairie Wellness Pharmacy Ltd",
+  "1820 Albert Street",
+  "Regina, SK S4P 2S7",
+  "Canada"
+ ],
+ "delivery": [
+  "Prairie Wellness Pharmacy Ltd",
+  "1820 Albert Street",
+  "Regina, SK S4P 2S7",
+  "Canada"
+ ],
+ "payment": {
+  "method": "SEPA Direct Debit",
+  "status": "UNPAID",
+  "paid_date": null
+ },
+ "items": [
+  {
+   "sku": "NDC-0378-0208",
+   "desc": "Metformin 500 mg 500ct",
+   "qty": "6",
+   "unit": "32.75",
+   "disc": "7.5",
+   "vat": "0",
+   "line": "181.76"
+  },
+  {
+   "sku": "NDC-0071-0155",
+   "desc": "Atorvastatin 20 mg 90ct",
+   "qty": "8",
+   "unit": "24.60",
+   "disc": "5",
+   "vat": "0",
+   "line": "186.96"
+  },
+  {
+   "sku": "OTC-GAU-4X4",
+   "desc": "Sterile Gauze 4x4 box 100",
+   "qty": "12",
+   "unit": "7.80",
+   "disc": "0",
+   "vat": "6.25",
+   "line": "93.60"
+  },
+  {
+   "sku": "OTC-THR-DIG",
+   "desc": "Digital Thermometer",
+   "qty": "10",
+   "unit": "11.20",
+   "disc": "10",
+   "vat": "6.25",
+   "line": "100.80"
+  }
+ ],
+ "net_total": "563.12",
+ "vat_total": "12.15",
+ "gross_total": "575.27"
+}

@@ -9,7 +9,7 @@ from image2cash.steps.context import Ctx
 from image2cash.steps.order import read_totals
 from image2cash.ui.core import AutomationError, ManualReview, _visible, read, wait_for
 from image2cash.ui.datefield import set_date
-from image2cash.validate import money
+from image2cash.validate import close, money
 from image2cash.verify import db
 
 
@@ -33,7 +33,7 @@ def create_and_pay(ctx: Ctx) -> None:
     }
     if copied["cust_ref"] != o.external_ref:
         raise ManualReview(f"invoice Cust.Ref. {copied['cust_ref']!r} != {o.external_ref!r}")
-    if copied["totals"]["total"] is None or money(copied["totals"]["total"]) != o.gross_total:
+    if not close(copied["totals"]["total"], o.gross_total, len(o.items)):
         raise ManualReview(f"invoice total {copied['totals']['total']} != {o.gross_total}")
     ctx.record("5.1 invoice opened", "ok", number=ctx.invoice_no, shot=shot, **copied)
 
@@ -125,12 +125,12 @@ def verify(ctx: Ctx) -> None:
     checks = {
         "invoice number": i["number"] == ctx.invoice_no,
         "linked to order": i["src_id"] == so["id"],
-        "invoice total": money(i["total"]) == o.gross_total,
+        "invoice total": close(i["total"], o.gross_total, len(o.items)),
         "payment method": pay is not None and pay["name"] == o.payment.method,
         "paid flag": bool(i["paid"]) == paid,
         "pay date": (i["pay_date"] == o.payment.paid_date.isoformat()) if paid else True,
-        "paid value": (money(i["paid_value"]) == o.gross_total) if paid else True,
-        "order total unchanged": money(so["total"]) == o.gross_total,
+        "paid value": (money(i["paid_value"]) == money(i["total"])) if paid else True,
+        "order total unchanged": money(so["total"]) == money(i["total"]),
         "order still open": not so["paid"],
         "order cust.ref": so["cust_ref"] == o.external_ref,
         "items copied": len(db.document_items(i["id"])) == len(o.items),

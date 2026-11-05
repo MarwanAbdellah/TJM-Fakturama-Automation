@@ -12,6 +12,7 @@ Calibrated behaviour this module is built around:
 
 from __future__ import annotations
 
+import logging
 import re
 import time
 from collections.abc import Callable
@@ -19,6 +20,8 @@ from collections.abc import Callable
 from image2cash.steps.context import Ctx
 from image2cash.ui import grid as G
 from image2cash.ui.core import AutomationError, ManualReview
+
+log = logging.getLogger("image2cash.selector")
 
 
 def _paste(text: str) -> None:
@@ -49,6 +52,7 @@ def search(ctx: Ctx, dialog, term: str, headers: list[str]) -> G.Grid | None:
     dialog.set_focus()
     edit.click_input()
     _paste(term)
+    log.debug("search %r in %r", term, dialog.window_text())
     time.sleep(1.0)
     if dialog.window_text() not in ui.dialogs():
         return None

@@ -15,12 +15,18 @@ def main(argv: list[str] | None = None) -> int:
 
     e = sub.add_parser("extract", help="OCR + parse an order image, print JSON and validation result")
     e.add_argument("image", type=Path)
+    e.add_argument(
+        "--ai", action="store_true", help="if the parser fails, let Claude read the image (sends it to Anthropic)"
+    )
 
     r = sub.add_parser("run", help="full Order-first flow against the running Fakturama")
     r.add_argument("image", type=Path, nargs="?")
     r.add_argument("--draft", type=Path, help="run a reviewed order.json instead of OCR'ing an image")
     r.add_argument("--run-dir", type=Path)
     r.add_argument("--resume", action="store_true", help="continue a stopped run whose Order is already saved")
+    r.add_argument(
+        "--ai", action="store_true", help="if the parser fails, let Claude read the image (sends it to Anthropic)"
+    )
 
     v = sub.add_parser("verify", help="read-only DB check of the documents for a Cust.Ref.")
     v.add_argument("cust_ref")
@@ -30,7 +36,7 @@ def main(argv: list[str] | None = None) -> int:
         from image2cash.extract import extract
         from image2cash.validate import check_order
 
-        draft = extract(a.image)
+        draft = extract(a.image, a.ai)
         print(draft.model_dump_json(indent=1))
         problems = check_order(draft)
         print("validation:", "OK" if not problems else problems)
@@ -42,7 +48,7 @@ def main(argv: list[str] | None = None) -> int:
         if not (a.image or a.draft):
             p.error("run needs an image or --draft")
         draft = OrderDraft.model_validate_json(a.draft.read_text(encoding="utf-8")) if a.draft else None
-        return run(a.image or a.draft, a.run_dir, draft=draft, resume=a.resume)
+        return run(a.image or a.draft, a.run_dir, draft=draft, resume=a.resume, ai=a.ai)
     if a.cmd == "verify":
         from image2cash.verify import db
 

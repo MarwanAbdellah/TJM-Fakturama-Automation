@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import sys
 import time
 import traceback
 from contextlib import contextmanager
@@ -13,7 +15,7 @@ from image2cash.extract import extract
 from image2cash.models import OrderDraft
 from image2cash.steps import debtor, invoice, order, product
 from image2cash.steps.context import Ctx
-from image2cash.ui.core import UI, AutomationError, ManualReview
+from image2cash.ui.core import UI, ManualReview
 from image2cash.validate import check_order
 
 STEPS = [
@@ -38,6 +40,11 @@ class ExitCode:
 
 
 LOCK = config.RUNS_DIR / ".lock"
+log = logging.getLogger("image2cash")
+
+
+class Busy(RuntimeError):
+    """The run lock is held by another image2cash process."""
 
 
 @contextmanager
@@ -52,7 +59,7 @@ def single_run():
         msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
     except OSError:
         f.close()
-        raise RuntimeError("another image2cash run is in progress") from None
+        raise Busy("another image2cash run is in progress") from None
     try:
         yield
     finally:
@@ -61,35 +68,52 @@ def single_run():
         f.close()
 
 
-def busy() -> bool:
-    try:
-        with single_run():
-            return False
-    except RuntimeError:
-        return True
-
-
-def run(image: Path, run_dir: Path | None = None, draft: OrderDraft | None = None, resume: bool = False) -> int:
+def run(
+    image: Path, run_dir: Path | None = None, draft: OrderDraft | None = None, resume: bool = False, ai: bool = False
+) -> int:
     run_dir = run_dir or config.RUNS_DIR / datetime.now().strftime("%Y%m%d-%H%M%S")
     run_dir.mkdir(parents=True, exist_ok=True)
-    started = time.time()
+    handler = _start_log(run_dir)
+    try:
+        return _run(image, run_dir, draft, resume, time.time(), ai)
+    finally:
+        log.removeHandler(handler)
+        handler.close()
 
-    draft = draft or extract(image)
+
+def _start_log(run_dir: Path) -> logging.Handler:
+    """Everything (UI actions at DEBUG) to runs/<id>/run.log; step lines to the console."""
+    log.setLevel(logging.DEBUG)
+    if not any(type(h) is logging.StreamHandler for h in log.handlers):
+        console = logging.StreamHandler(sys.stdout)
+        console.setLevel(logging.INFO)
+        console.setFormatter(logging.Formatter("%(message)s"))
+        log.addHandler(console)
+    handler = logging.FileHandler(run_dir / "run.log", encoding="utf-8")
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)-7s %(name)-18s %(message)s"))
+    log.addHandler(handler)
+    return handler
+
+
+def _run(image: Path, run_dir: Path, draft: OrderDraft | None, resume: bool, started: float, ai: bool = False) -> int:
+    log.info("run %s (image=%s, from draft=%s, resume=%s)", run_dir.name, image, draft is not None, resume)
+    draft = draft or extract(image, ai)
     (run_dir / "order.json").write_text(draft.model_dump_json(indent=1), encoding="utf-8")
     problems = check_order(draft)
     if problems:
-        print("Source rejected before touching Fakturama:")
-        for p in problems:
-            print("  -", p)
+        log.error("source rejected before touching Fakturama: %s", "; ".join(problems))
         (run_dir / "rejected.txt").write_text("\n".join(problems), encoding="utf-8")
         return ExitCode.INVALID_SOURCE
 
     try:
         with single_run():
             return _drive(draft, run_dir, resume, started)
-    except RuntimeError as exc:
-        print(exc)
+    except Busy as exc:  # only the lock; UI timeouts are RuntimeErrors too
+        log.error("%s", exc)
         return ExitCode.BUSY
+    except Exception:  # noqa: BLE001 - e.g. Fakturama not open: fails before the step log exists
+        log.exception("could not start driving Fakturama")
+        return ExitCode.FAILED
 
 
 def _drive(draft: OrderDraft, run_dir: Path, resume: bool, started: float) -> int:
@@ -112,28 +136,25 @@ def _drive(draft: OrderDraft, run_dir: Path, resume: bool, started: float) -> in
         return ExitCode.OK
     except ManualReview as exc:
         ctx.record("stopped", "REVIEW", reason=str(exc), shot=ctx.shot("manual_review"))
-        print(f"\nMANUAL REVIEW: {exc}\nThe Fakturama state is left as-is for a human. Created so far: {ctx.created}")
+        log.warning("MANUAL REVIEW: %s. Fakturama is left as-is for a human. Created so far: %s", exc, ctx.created)
         return ExitCode.MANUAL_REVIEW
-    except (AutomationError, Exception) as exc:  # noqa: BLE001 - record everything
+    except Exception as exc:  # noqa: BLE001 - record everything
+        log.exception("step failed")
         ctx.record("stopped", "FAIL", reason=str(exc), trace=traceback.format_exc(), shot=ctx.shot("failure"))
-        print(f"\nFAILED: {exc}\nCreated so far: {ctx.created}")
+        log.error("FAILED: %s. Created so far: %s", exc, ctx.created)
         return ExitCode.FAILED
     finally:
         ctx.flush()
-        print(f"run log: {run_dir / 'run.json'}")
+        log.info("run log: %s", run_dir / "run.log")
 
 
 def _summary(ctx: Ctx) -> None:
-    print("\n=== Image-to-Cash complete ===")
-    print(
-        f"Order   {ctx.order_no}  Cust.Ref. {ctx.order.external_ref}"
-        f"  total {ctx.order.gross_total} {ctx.order.currency}"
-    )
-    print(
-        f"Invoice {ctx.invoice_no}  payment {ctx.order.payment.method}"
-        f" / {ctx.order.payment.status.value} {ctx.order.payment.paid_date or ''}"
-    )
+    o = ctx.order
+    log.info("=== Image-to-Cash complete ===")
+    log.info("Order   %s  Cust.Ref. %s  total %s %s", ctx.order_no, o.external_ref, o.gross_total, o.currency)
+    p = o.payment
+    log.info("Invoice %s  payment %s / %s %s", ctx.invoice_no, p.method, p.status.value, p.paid_date or "")
     if ctx.created:
-        print("Created master data: " + ", ".join(ctx.created))
+        log.info("Created master data: %s", ", ".join(ctx.created))
     for w in ctx.warnings:
-        print("warning:", w)
+        log.warning("warning: %s", w)

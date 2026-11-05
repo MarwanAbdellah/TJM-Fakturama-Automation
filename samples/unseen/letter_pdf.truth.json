@@ -1,0 +1,47 @@
+{
+ "external_ref": "LTR-0907-B",
+ "order_date": "2026-11-03",
+ "currency": "USD",
+ "company": "Harbor Point Long-Term Care",
+ "contact": "Grace Lindqvist",
+ "billing": [
+  "Harbor Point Long-Term Care",
+  "12 Wharf Road",
+  "Portland, ME 04101",
+  "United States"
+ ],
+ "delivery": [
+  "Harbor Point Long-Term Care",
+  "12 Wharf Road",
+  "Portland, ME 04101",
+  "United States"
+ ],
+ "payment": {
+  "method": "Bank Transfer",
+  "status": "PAID",
+  "paid_date": "2026-11-05"
+ },
+ "items": [
+  {
+   "sku": "NDC-0641-6078",
+   "desc": "Heparin 5000 U/mL vial 10ct",
+   "qty": "3",
+   "unit": "54.20",
+   "disc": "0",
+   "vat": "0",
+   "line": "162.60"
+  },
+  {
+   "sku": "OTC-SYR-10ML",
+   "desc": "Syringe 10 mL Luer Lock 100ct",
+   "qty": "5",
+   "unit": "21.30",
+   "disc": "0",
+   "vat": "6.25",
+   "line": "106.50"
+  }
+ ],
+ "net_total": "269.10",
+ "vat_total": "6.66",
+ "gross_total": "275.76"
+}

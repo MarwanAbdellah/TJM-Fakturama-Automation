@@ -43,8 +43,15 @@ def test_fill_missing_headers_by_position():
     assert _fill_missing(seen, expected) == expected
 
 
-def test_fill_missing_refuses_when_counts_disagree():
+def test_fill_missing_refuses_on_a_tie():
     assert _fill_missing(["A", None, None, "D"], ["A", "B", "D"]) == ["A", None, None, "D"]
+
+
+def test_fill_missing_outvotes_a_partial_caption():
+    # live case: 'U.Price' read as 'Price', most captions lost, blank columns at the end
+    expected = ["Pos.", "Qty.", "Item No.", "Picture", "Name", "Description", "VAT", "U.Price", "Discount", "Price"]
+    seen = ["Pos.", None, None, None, None, None, None, "Price", "Discount", None, None, None]
+    assert _fill_missing(seen, expected) == expected + [None, None]
 
 
 def test_separators_ignore_text_but_find_grid_lines():

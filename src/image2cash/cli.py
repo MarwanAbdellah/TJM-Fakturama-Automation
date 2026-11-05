@@ -17,7 +17,8 @@ def main(argv: list[str] | None = None) -> int:
     e.add_argument("image", type=Path)
 
     r = sub.add_parser("run", help="full Order-first flow against the running Fakturama")
-    r.add_argument("image", type=Path)
+    r.add_argument("image", type=Path, nargs="?")
+    r.add_argument("--draft", type=Path, help="run a reviewed order.json instead of OCR'ing an image")
     r.add_argument("--run-dir", type=Path)
     r.add_argument("--resume", action="store_true", help="continue a stopped run whose Order is already saved")
 
@@ -36,8 +37,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if not problems else 3
     if a.cmd == "run":
         from image2cash.flow import run
+        from image2cash.models import OrderDraft
 
-        return run(a.image, a.run_dir, resume=a.resume)
+        if not (a.image or a.draft):
+            p.error("run needs an image or --draft")
+        draft = OrderDraft.model_validate_json(a.draft.read_text(encoding="utf-8")) if a.draft else None
+        return run(a.image or a.draft, a.run_dir, draft=draft, resume=a.resume)
     if a.cmd == "verify":
         from image2cash.verify import db
 

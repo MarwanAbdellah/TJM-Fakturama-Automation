@@ -1,0 +1,15 @@
+{
+ "brand": "Meridian Rx Supply  |  Sales Order",
+ "order": {"ref": "RX-1002", "date": "2026-10-09", "customer_id": "PH-30882", "currency": "USD"},
+ "customer": {
+  "company": "Northgate Medical Distribution Inc", "alias": "NORTHGATE-TOR", "contact": "Priya Raman",
+  "email": "purchasing@northgate-med.example.com", "phone": "+1 416 555 0187",
+  "billing": ["Northgate Medical Distribution Inc", "88 Bay Street", "Toronto, ON M5J 2S1", "Canada"],
+  "delivery": ["Northgate Receiving Warehouse", "5600 Explorer Drive", "Mississauga, ON L4W 4Y2", "Canada"]
+ },
+ "payment": {"method": "Bank Transfer", "status": "PAID", "date": "2026-10-14"},
+ "items": [
+  {"sku": "NDC-0093-4155", "desc": "Amoxicillin 500 mg Capsules 100ct", "qty": 20, "unit_net": 18.40, "disc": 8, "vat": 0},
+  {"sku": "NDC-0071-0155", "desc": "Atorvastatin 20 mg Tablets 90ct", "qty": 12, "unit_net": 24.60, "disc": 0, "vat": 0}
+ ]
+}

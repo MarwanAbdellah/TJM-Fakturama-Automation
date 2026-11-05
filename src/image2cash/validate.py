@@ -129,11 +129,6 @@ def check_order(order: OrderDraft) -> list[str]:
     return problems
 
 
-def same_text(a: str | None, b: str | None) -> bool:
-    """Exact match after collapsing whitespace. Case-sensitive on purpose."""
-    return " ".join((a or "").split()) == " ".join((b or "").split())
-
-
 # Eastern-Arabic / Persian digits and separators. The test workspace runs with
 # a ps/AF currency locale, so Fakturama renders amounts like "۴۵۰٫۰۰ ؋".
 _DIGITS = str.maketrans(

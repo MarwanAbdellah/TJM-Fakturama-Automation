@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import time
-from decimal import Decimal
 
 from image2cash.models import PaidStatus
 from image2cash.steps.context import Ctx
 from image2cash.steps.order import read_totals
 from image2cash.ui.core import AutomationError, ManualReview, _visible, read, wait_for
 from image2cash.ui.datefield import set_date
-from image2cash.validate import money, parse_amount
+from image2cash.validate import money
 from image2cash.verify import db
 
 
@@ -78,7 +77,9 @@ def create_and_pay(ctx: Ctx) -> None:
             method=ui.combo_value(pay_combo),
             date=read(date_edit),
             value=read(value),
-            shot=ctx.shot("invoice_paid", [(paid_box, "paid"), (pay_combo, "payment"), (date_edit, "date"), (value, "Value")]),
+            shot=ctx.shot(
+                "invoice_paid", [(paid_box, "paid"), (pay_combo, "payment"), (date_edit, "date"), (value, "Value")]
+            ),
         )
     else:
         if paid_box.get_toggle_state():
@@ -89,7 +90,9 @@ def create_and_pay(ctx: Ctx) -> None:
 
     _select_address_tab(ctx, "Invoice address")  # same 2.2.0 save bug as the Order
     ui.save()  # 5.4
-    wait_for(lambda: not ui.active_editor().startswith("*") and ui.active_editor() != "New Invoice", 10, what="invoice saved")
+    wait_for(
+        lambda: not ui.active_editor().startswith("*") and ui.active_editor() != "New Invoice", 10, what="invoice saved"
+    )
     verify(ctx)
 
 

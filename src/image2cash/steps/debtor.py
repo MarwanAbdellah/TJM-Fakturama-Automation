@@ -28,13 +28,13 @@ def _row_is_target(ctx: Ctx, contact=None):
     d = ctx.order.debtor
 
     def ok(r) -> bool:
-        if contact is not None and contact.number and r.get("No.") and r.get("No.") != contact.number:
+        if contact is not None and contact.number and r.get("No.") and not S.ocr_eq(r.get("No."), contact.number):
             return False
         return (
             S.prefix_match(r.get("Company"), d.company)
             and S.prefix_match(r.get("First Name"), d.first_name)
             and S.prefix_match(r.get("Name"), d.last_name)
-            and r.get("ZIP") == d.billing.zip
+            and S.ocr_eq(r.get("ZIP"), d.billing.zip)
             and S.prefix_match(r.get("City"), d.billing.city)
         )
 
@@ -45,7 +45,22 @@ def select_or_create(ctx: Ctx) -> None:
     d = ctx.order.debtor
     matches = _exact(ctx)
     if len(matches) > 1:
-        raise ManualReview(f"{len(matches)} debtors match {d.company}/{d.first_name} {d.last_name}/{d.billing.zip} {d.billing.city}")
+        raise ManualReview(
+            f"{len(matches)} debtors match {d.company}/{d.first_name} {d.last_name}/{d.billing.zip} {d.billing.city}"
+        )
+    if not matches:
+        # Same company and ZIP but another City spelling ('Boston' vs 'Boston, MA') is
+        # probably the same customer: a human decides rather than we create a duplicate.
+        near = db.query(
+            'SELECT c."CUSTOMERNUMBER", a."CITY" FROM "FKT_CONTACT" c '
+            'JOIN "FKT_ADDRESS" a ON a."CONTACT_ADDRESSES" = c."ID" '
+            f'WHERE TRIM(c."COMPANY") = ? AND TRIM(a."ZIP") = ? AND {db.live("c")} AND {db.live("a")}',
+            (d.company.strip(), d.billing.zip.strip()),
+        )
+        if near:
+            raise ManualReview(
+                f"debtor {d.company!r} with ZIP {d.billing.zip} exists with a different name/city: {near}"
+            )
 
     # 2.1-2.3: the existence check is done in the Order's selector, as briefed.
     dialog, icon = S.open_selector(ctx, "Addresses", TITLE)
@@ -106,7 +121,12 @@ def verify_order_addresses(ctx: Ctx) -> None:
             raise ManualReview(f"{tab} on the Order lacks {missing}: {text!r}")
     if seen.get("Delivery address") is None and not d.same_delivery:
         ctx.warnings.append("Order shows no separate Delivery address tab; delivery address verified in DB only")
-    ctx.record("2.4 order addresses", "ok", **{k: (v or "").replace("\r\n", " | ") for k, v in seen.items()}, shot=ctx.shot("order_addresses"))
+    ctx.record(
+        "2.4 order addresses",
+        "ok",
+        **{k: (v or "").replace("\r\n", " | ") for k, v in seen.items()},
+        shot=ctx.shot("order_addresses"),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -128,7 +148,7 @@ def create(ctx: Ctx) -> None:
     ui.set_text(last, d.last_name)
     # Salutation stays '---' (2.6)
 
-    _fill_address(ctx, d.billing, main=True, with_contact=True)  # 2.7
+    _fill_address(ctx, d.billing, with_contact=True)  # 2.7
     types = ["Invoice address"] + (["Delivery address"] if d.same_delivery else [])
     _set_address_types(ctx, types)  # 2.8
     shot_main = ctx.shot("debtor_main_address")
@@ -155,7 +175,9 @@ def create(ctx: Ctx) -> None:
     shot_misc = ctx.shot("debtor_misc", [(pay, "Payment")])
 
     ui.save()  # 2.11
-    wait_for(lambda: not ui.active_editor().startswith("*") and ui.active_editor() != "New Debtor", 10, what="debtor saved")
+    wait_for(
+        lambda: not ui.active_editor().startswith("*") and ui.active_editor() != "New Debtor", 10, what="debtor saved"
+    )
     rows = _exact(ctx)
     if len(rows) != 1:
         raise AutomationError(f"debtor not saved as one exact row (found {len(rows)})")
@@ -173,12 +195,14 @@ def create(ctx: Ctx) -> None:
     _check_saved_addresses(ctx, addrs)
 
 
-def _fill_address(ctx: Ctx, a: Address, main: bool, with_contact: bool) -> None:
+def _fill_address(ctx: Ctx, a: Address, with_contact: bool) -> None:
     ui, d = ctx.ui, ctx.order.debtor
     ed = ui.editor_pane()
     if a.name and a.name != d.company:
         ui.set_text(ui.labelled("additional name", "Edit", root=ed), a.name)
     ui.set_text(ui.labelled("Street", "Edit", root=ed), a.street)
+    if a.extra_lines:  # brief 2.7: only when the source supplies it
+        ui.set_text(ui.labelled("Address specification", "Edit", root=ed), " ".join(a.extra_lines))
     z, city = ui.row_controls("ZIP - City", "Edit", root=ed)[:2]
     ui.set_text(z, a.zip)
     ui.set_text(city, a.city)
@@ -231,13 +255,15 @@ def _add_delivery_address(ctx: Ctx, a: Address) -> None:
     before = {c.element_info.name for c in ed.descendants(control_type="TabItem")}
     ui.click(ui.find("+", "Button", root=ed))
     new_tab = wait_for(
-        lambda: [c for c in ed.descendants(control_type="TabItem") if c.element_info.name not in before and _visible(c)],
+        lambda: [
+            c for c in ed.descendants(control_type="TabItem") if c.element_info.name not in before and _visible(c)
+        ],
         5,
         what="additional address tab",
     )[0]
     ui.click(new_tab)
     time.sleep(0.5)
-    _fill_address(ctx, a, main=False, with_contact=False)
+    _fill_address(ctx, a, with_contact=False)
     _set_address_types(ctx, ["Delivery address"])
     ctx.record("2.8 delivery address", "ok", tab=new_tab.element_info.name, shot=ctx.shot("debtor_delivery_address"))
 
@@ -260,6 +286,9 @@ def _check_saved_addresses(ctx: Ctx, addrs: list[dict]) -> None:
         )
     if d.phone and bill[0]["phone"] != d.phone:
         raise AutomationError(f"telephone not persisted: {bill[0]['phone']!r}")
+    for a, row in ((d.billing, bill[0]),):
+        if a.extra_lines and (row["spec"] or "") != " ".join(a.extra_lines):
+            raise AutomationError(f"address specification not persisted: {row['spec']!r}")
     deliv = find(d.delivery)
     if len(deliv) != 1 or "DELIVERY" not in deliv[0]["types"]:
         raise AutomationError(f"saved delivery address/role wrong: {addrs}")
@@ -280,7 +309,9 @@ def ensure_payment_method(ctx: Ctx) -> str:
         row = rows[0]
         stored = (row["code"] or "").strip()
         if stored and stored != UNTDID[code_label]:
-            raise ManualReview(f"payment {p.method!r} exists with code {stored!r}, expected {UNTDID[code_label]} ({code_label})")
+            raise ManualReview(
+                f"payment {p.method!r} exists with code {stored!r}, expected {UNTDID[code_label]} ({code_label})"
+            )
         if not stored:
             ctx.warnings.append(f"payment {p.method!r} exists without a payment code; reused (not edited)")
         ctx.record("2.10.2 payment method", "exists", id=row["id"], description=row["description"], code=row["code"])

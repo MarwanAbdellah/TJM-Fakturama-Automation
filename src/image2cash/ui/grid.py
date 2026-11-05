@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from image2cash.extract.ocr import Line, ocr_pil
-from image2cash.ui.core import AutomationError, wait_for
+from image2cash.ui.core import AutomationError
 
 _SCRATCH = Path(tempfile.gettempdir()) / "image2cash_grid.png"
 
@@ -100,18 +100,18 @@ def separators(img, y0: int, y1: int, coverage: float = 1.0) -> list[int]:
 
 
 def _fill_missing(names: list[str | None], expected: list[str]) -> list[str | None]:
-    """OCR misses some faint header captions. Between two recognised headers,
-    if the number of unnamed columns equals the number of expected captions
-    between them (``expected`` is in screen order), name them by position."""
-    out = list(names)
-    known = [(i, expected.index(n)) for i, n in enumerate(out) if n in expected]
-    for (ci, ei), (cj, ej) in zip(known, known[1:]):
-        gap_cols = list(range(ci + 1, cj))
-        gap_names = expected[ei + 1 : ej]
-        if gap_cols and len(gap_cols) == len(gap_names) and all(out[c] is None for c in gap_cols):
-            for c, n in zip(gap_cols, gap_names):
-                out[c] = n
-    return out
+    """Name columns by position. OCR reads only some faint header captions, and
+    sometimes partially ('U.Price' -> 'Price'). Each recognised caption votes for
+    an offset between its column and its place in ``expected`` (screen order);
+    a clear majority names every column. A tie keeps the OCR names."""
+    from collections import Counter
+
+    votes = Counter(i - expected.index(n) for i, n in enumerate(names) if n in expected)
+    ranked = votes.most_common(2)
+    if not ranked or (len(ranked) == 2 and ranked[0][1] == ranked[1][1]):
+        return list(names)
+    off = ranked[0][0]
+    return [expected[i - off] if 0 <= i - off < len(expected) else None for i in range(len(names))]
 
 
 def _merge(xs: list[int], tol: int = 3) -> list[int]:
@@ -149,7 +149,7 @@ def split_on_separators(line: Line, seps: list[int], margin: float = 3) -> list[
     ]
 
 
-def read_grid(rect, header_names: list[str], header_aliases: dict[str, str] | None = None, owner=None) -> Grid:
+def read_grid(rect, header_names: list[str], owner=None) -> Grid:
     """OCR a grid. ``header_names`` are the expected header captions.
 
     The header row is the line band containing the most known captions. Body
@@ -157,7 +157,6 @@ def read_grid(rect, header_names: list[str], header_aliases: dict[str, str] | No
     x-span overlaps them most.
     """
     aliases = {h.lower(): h for h in header_names}
-    aliases.update({k.lower(): v for k, v in (header_aliases or {}).items()})
     lines, img = capture(rect, owner)
     heads = [l for l in lines if l.text.strip().lower().rstrip(":") in aliases]
     if not heads:
@@ -187,11 +186,13 @@ def read_grid(rect, header_names: list[str], header_aliases: dict[str, str] | No
         # name of the header caption centred inside it. Works for left-aligned
         # (Order items) and centred (selector dialogs) headers alike.
         edges = [rect.left] + seps + [rect.right]
-        cols = [(l, r) for l, r in zip(edges, edges[1:]) if r - l > 4]
-        names: list[str | None] = []
-        for left, right in cols:
-            inside = [n for n, h in named if left <= h.cx <= right]
-            names.append(inside[0] if inside else None)
+        # Slivers (< 12 px) come from borders and picture edges, not columns.
+        cols = [(l, r) for l, r in zip(edges, edges[1:]) if r - l >= 12]
+        names: list[str | None] = [None] * len(cols)
+        for n, h in named:  # each caption goes to the column it overlaps most
+            best = max(range(len(cols)), key=lambda i: h.overlaps_x(cols[i]), default=None)
+            if best is not None and h.overlaps_x(cols[best]) > 0 and names[best] is None:
+                names[best] = n
         names = _fill_missing(names, header_names)
         spans = [(n, l, r) for n, (l, r) in zip(names, cols) if n]
     if not spans:
@@ -232,12 +233,12 @@ def read_grid(rect, header_names: list[str], header_aliases: dict[str, str] | No
     )
 
 
-def read_stable(rect, header_names, header_aliases=None, timeout: float = 8, owner=None) -> Grid:
+def read_stable(rect, header_names, timeout: float = 8, owner=None) -> Grid:
     """Read until two consecutive captures agree: 'wait for the list to stabilize'."""
     last = None
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        g = read_grid(rect, header_names, header_aliases, owner)
+        g = read_grid(rect, header_names, owner)
         if last is not None and g.text() == last.text():
             return g
         last = g
@@ -271,11 +272,3 @@ def search_edit(dialog):
         raise AutomationError("selector search field not found")
     lr = label[0].rectangle()
     return min(edits, key=lambda e: abs(e.rectangle().top - lr.top) + abs(e.rectangle().left - lr.right))
-
-
-def wait_rows(rect, header_names, predicate, timeout=8, header_aliases=None, owner=None) -> Grid:
-    return wait_for(
-        lambda: (lambda g: g if predicate(g) else None)(read_grid(rect, header_names, header_aliases, owner)),
-        timeout,
-        what="grid rows",
-    )

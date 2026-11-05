@@ -1,0 +1,16 @@
+{
+ "brand": "Meridian Rx Supply  |  Sales Order",
+ "order": {"ref": "RX-1001", "date": "2026-10-06", "customer_id": "PH-20417", "currency": "USD"},
+ "customer": {
+  "company": "Harborview Pharmacy LLC", "alias": "HARBORVIEW-BOS", "contact": "Dana Whitfield",
+  "email": "orders@harborview-pharmacy.example.com", "phone": "+1 617 555 0142",
+  "billing": ["Harborview Pharmacy LLC", "214 Tremont Street", "Boston, MA 02116", "United States"],
+  "delivery": ["Harborview Pharmacy LLC", "214 Tremont Street", "Boston, MA 02116", "United States"]
+ },
+ "payment": {"method": "Credit Card", "status": "PAID", "date": "2026-10-07"},
+ "items": [
+  {"sku": "NDC-0093-4155", "desc": "Amoxicillin 500 mg Capsules 100ct", "qty": 6, "unit_net": 18.40, "disc": 0, "vat": 0},
+  {"sku": "NDC-0378-0208", "desc": "Metformin 500 mg Tablets 500ct", "qty": 4, "unit_net": 32.75, "disc": 5, "vat": 0},
+  {"sku": "OTC-GLV-N100", "desc": "Nitrile Exam Gloves Box 100", "qty": 10, "unit_net": 9.90, "disc": 10, "vat": 6.25}
+ ]
+}

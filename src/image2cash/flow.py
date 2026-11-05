@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 import traceback
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -23,7 +24,9 @@ STEPS = [
     ("save order", order.complete_and_save),
     ("invoice and payment", invoice.create_and_pay),
 ]
-RESUME = {"invoice": [("verify saved order", order.verify_saved_order), ("invoice and payment", invoice.create_and_pay)]}
+RESUME = {
+    "invoice": [("verify saved order", order.verify_saved_order), ("invoice and payment", invoice.create_and_pay)]
+}
 
 
 class ExitCode:
@@ -31,6 +34,39 @@ class ExitCode:
     FAILED = 1
     MANUAL_REVIEW = 2
     INVALID_SOURCE = 3
+    BUSY = 4
+
+
+LOCK = config.RUNS_DIR / ".lock"
+
+
+@contextmanager
+def single_run():
+    """One Fakturama run at a time, CLI or app. The OS releases the lock if the process dies."""
+    import msvcrt
+
+    LOCK.parent.mkdir(parents=True, exist_ok=True)
+    f = open(LOCK, "a+")
+    try:
+        f.seek(0)
+        msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+    except OSError:
+        f.close()
+        raise RuntimeError("another image2cash run is in progress") from None
+    try:
+        yield
+    finally:
+        f.seek(0)
+        msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+        f.close()
+
+
+def busy() -> bool:
+    try:
+        with single_run():
+            return False
+    except RuntimeError:
+        return True
 
 
 def run(image: Path, run_dir: Path | None = None, draft: OrderDraft | None = None, resume: bool = False) -> int:
@@ -48,6 +84,15 @@ def run(image: Path, run_dir: Path | None = None, draft: OrderDraft | None = Non
         (run_dir / "rejected.txt").write_text("\n".join(problems), encoding="utf-8")
         return ExitCode.INVALID_SOURCE
 
+    try:
+        with single_run():
+            return _drive(draft, run_dir, resume, started)
+    except RuntimeError as exc:
+        print(exc)
+        return ExitCode.BUSY
+
+
+def _drive(draft: OrderDraft, run_dir: Path, resume: bool, started: float) -> int:
     ui = UI(evidence_dir=run_dir / "screenshots")
     ctx = Ctx(ui=ui, order=draft, run_dir=run_dir, resume=resume)
     ctx.record("extract", "ok", engine=draft.engine, min_conf=draft.min_confidence, items=len(draft.items))
@@ -80,8 +125,14 @@ def run(image: Path, run_dir: Path | None = None, draft: OrderDraft | None = Non
 
 def _summary(ctx: Ctx) -> None:
     print("\n=== Image-to-Cash complete ===")
-    print(f"Order   {ctx.order_no}  Cust.Ref. {ctx.order.external_ref}  total {ctx.order.gross_total} {ctx.order.currency}")
-    print(f"Invoice {ctx.invoice_no}  payment {ctx.order.payment.method} / {ctx.order.payment.status.value} {ctx.order.payment.paid_date or ''}")
+    print(
+        f"Order   {ctx.order_no}  Cust.Ref. {ctx.order.external_ref}"
+        f"  total {ctx.order.gross_total} {ctx.order.currency}"
+    )
+    print(
+        f"Invoice {ctx.invoice_no}  payment {ctx.order.payment.method}"
+        f" / {ctx.order.payment.status.value} {ctx.order.payment.paid_date or ''}"
+    )
     if ctx.created:
         print("Created master data: " + ", ".join(ctx.created))
     for w in ctx.warnings:

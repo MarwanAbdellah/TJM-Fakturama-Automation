@@ -12,8 +12,9 @@ Calibrated behaviour this module is built around:
 
 from __future__ import annotations
 
+import re
 import time
-from typing import Callable
+from collections.abc import Callable
 
 from image2cash.steps.context import Ctx
 from image2cash.ui import grid as G
@@ -51,14 +52,21 @@ def search(ctx: Ctx, dialog, term: str, headers: list[str]) -> G.Grid | None:
     time.sleep(1.0)
     if dialog.window_text() not in ui.dialogs():
         return None
-    grid = G.grid_below_search(dialog)
-    return G.read_stable(grid.rectangle(), headers, owner=dialog)
+    pane = G.grid_below_search(dialog)
+    grid = G.read_stable(pane.rectangle(), headers, owner=dialog)
+    # shortcut: no paging in selectors; an exact SKU/company search rarely fills the list. Page if it ever does.
+    if grid.rows and grid.rows[-1].y > pane.rectangle().bottom - 30:
+        raise ManualReview(f"{term!r} matches more rows than {dialog.window_text()!r} shows; narrow it by hand")
+    return grid
 
 
 def pick(ctx: Ctx, dialog, grid: G.Grid, is_target: Callable[[G.Row], bool], column: str) -> None:
     rows = [r for r in grid.rows if is_target(r)]
     if len(rows) != 1:
-        raise ManualReview(f"expected one matching row in {dialog.window_text()!r}, OCR found {len(rows)}: {[r.cells for r in grid.rows]}")
+        raise ManualReview(
+            f"expected one matching row in {dialog.window_text()!r},"
+            f" OCR found {len(rows)}: {[r.cells for r in grid.rows]}"
+        )
     x, y = rows[0].boxes.get(column) or next(iter(rows[0].boxes.values()))
     from pywinauto import mouse
 
@@ -75,6 +83,13 @@ def press(dialog, name: str) -> None:
             time.sleep(0.8)
             return
     raise AutomationError(f"{name!r} not in {dialog.window_text()!r}")
+
+
+def ocr_eq(seen: str | None, want: str) -> bool:
+    """Equal up to OCR confusions (O/0, I/L/1, S/5) and stray punctuation such as a
+    cell border read as '|'. Only used to find the row to click: identity is decided by the DB."""
+    norm = lambda t: re.sub(r"[^A-Z0-9./-]", "", (t or "").upper()).translate(str.maketrans("OILS", "0115"))  # noqa: E731
+    return bool(seen) and norm(seen) == norm(want)
 
 
 def prefix_match(cell: str, full: str) -> bool:

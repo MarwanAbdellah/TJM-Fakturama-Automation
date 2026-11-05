@@ -29,7 +29,7 @@ def select_or_create(ctx: Ctx, item: Item) -> None:
     rows = db.products_with_sku(item.sku)
     if len(rows) > 1:
         raise ManualReview(f"{len(rows)} products with SKU {item.sku}")
-    before = _item_rows(ctx)
+    pos = ctx.order.items.index(item) + 1  # the Order is new, so line n has Pos. n
     dialog, icon = S.open_selector(ctx, "Items", TITLE)  # 3.2
     grid = S.search(ctx, dialog, item.sku, SELECT_HEADERS)  # 3.3
     shot = ctx.shot(f"product_selector_{item.sku}", [(icon, "select product")])
@@ -38,21 +38,21 @@ def select_or_create(ctx: Ctx, item: Item) -> None:
             raise ManualReview(f"selector auto-accepted a product for {item.sku} that is not an exact SKU match")
         how = "auto-accepted unique row"
     elif len(rows) == 1:
-        S.pick(ctx, dialog, grid, lambda r: r.get("Item No.") == item.sku, "Item No.")
+        S.pick(ctx, dialog, grid, lambda r: sku_eq(r.get("Item No."), item.sku), "Item No.")
         how = "picked exact row"
     else:
-        if any(r.get("Item No.") == item.sku for r in grid.rows):
+        if any(sku_eq(r.get("Item No."), item.sku) for r in grid.rows):
             raise ManualReview(f"grid shows SKU {item.sku} but the DB has no live product with it")
         S.press(dialog, "Cancel")
         ctx.record(f"3.3 product {item.sku}", "missing", rows_seen=len(grid.rows), shot=shot)
         create(ctx, item)
-        return reselect(ctx, item, before)
-    _check_new_row(ctx, item, before)
+        return reselect(ctx, item, pos)
+    _check_new_row(ctx, item, pos)
     _check_master(ctx, item, rows[0])
     ctx.record(f"3.3 product {item.sku}", "ok", how=how, product=rows[0]["id"], shot=shot)
 
 
-def reselect(ctx: Ctx, item: Item, before: int) -> None:
+def reselect(ctx: Ctx, item: Item, pos: int) -> None:
     """3.12: pick the newly saved product from the still-open Order."""
     rows = db.products_with_sku(item.sku)
     if len(rows) != 1:
@@ -60,8 +60,8 @@ def reselect(ctx: Ctx, item: Item, before: int) -> None:
     dialog, _ = S.open_selector(ctx, "Items", TITLE)
     grid = S.search(ctx, dialog, item.sku, SELECT_HEADERS)
     if grid is not None:
-        S.pick(ctx, dialog, grid, lambda r: r.get("Item No.") == item.sku, "Item No.")
-    _check_new_row(ctx, item, before)
+        S.pick(ctx, dialog, grid, lambda r: sku_eq(r.get("Item No."), item.sku), "Item No.")
+    _check_new_row(ctx, item, pos)
     ctx.record(f"3.12 product {item.sku} reselected", "ok", product=rows[0]["id"])
 
 
@@ -74,38 +74,80 @@ def _items_grid(ctx: Ctx):
     panes = [
         c
         for c in holder.parent().children()
-        if c.element_info.control_type == "Pane" and c.rectangle().left >= hr.right - 2 and abs(c.rectangle().top - hr.top) < 6
+        if c.element_info.control_type == "Pane"
+        and c.rectangle().left >= hr.right - 2
+        and abs(c.rectangle().top - hr.top) < 6
     ]
     if not panes:
         raise AutomationError("Order item table not found")
     return panes[0]
 
 
-def read_items(ctx: Ctx) -> G.Grid:
+sku_eq = S.ocr_eq
+
+
+def _scroll_to_bottom(ctx: Ctx, pane) -> None:
+    """The item table gets its own scrollbar after ~7 rows (calibrated). Its scrollbar
+    buttons ignore UIA Invoke; the mouse wheel over the grid scrolls the table itself.
+    Guard: if the 'Items' label moved, the outer editor scrolled instead."""
+    from pywinauto import mouse
+
+    r = pane.rectangle()
+    label = lambda: ctx.ui.find("Items", "Text", root=ctx.ui.editor_pane()).rectangle().top  # noqa: E731
+    before = label()
+    ctx.ui.focus()
+    mouse.scroll(coords=((r.left + r.right) // 2, (r.top + r.bottom) // 2), wheel_dist=-10)
+    time.sleep(0.4)
+    if label() != before:
+        raise AutomationError("mouse wheel scrolled the Order editor, not the item table")
+
+
+def last_line(ctx: Ctx) -> tuple[G.Grid, G.Row]:
+    """The bottom-most fully visible item row (the newest line)."""
     ctx.back_to_order()
     pane = _items_grid(ctx)
-    return G.read_grid(pane.rectangle(), ITEM_HEADERS, owner=ctx.ui.main)
+    _scroll_to_bottom(ctx, pane)
+    r = pane.rectangle()
+    r.bottom = min(r.bottom, ctx.ui._editor_folder().rectangle().bottom)  # the table may extend below the editor
+
+    def probe():  # right after an Enter the table can repaint mid-capture: retry
+        g = G.read_grid(r, ITEM_HEADERS, owner=ctx.ui.main)
+        rows = [x for x in g.rows if x.get("Item No.") and x.y < r.bottom - 8]  # drop a half-clipped bottom row
+        return (g, rows[-1]) if rows else None
+
+    return wait_for(probe, 6, what="item rows")
 
 
-def _item_rows(ctx: Ctx) -> int:
-    return len([r for r in read_items(ctx).rows if r.get("Item No.")])
+def _row_pos(row: G.Row) -> int | None:
+    return int(row.get("Pos.")) if row.get("Pos.").isdigit() else None
 
 
-def _check_new_row(ctx: Ctx, item: Item, before: int) -> None:
-    g = wait_for(
-        lambda: (lambda g: g if len([r for r in g.rows if r.get("Item No.")]) == before + 1 else None)(read_items(ctx)),
-        8,
-        what=f"new item row for {item.sku}",
-    )
-    last = [r for r in g.rows if r.get("Item No.")][-1]
-    if last.get("Item No.") != item.sku:
-        raise ManualReview(f"the new Order line shows {last.get('Item No.')!r}, expected {item.sku}")
+def is_line(pos: int, seen: int | None, above: int | None, has_above: bool) -> bool:
+    """Is the bottom row line ``pos``? Pos. on the blue selected row is sometimes
+    unreadable; then the row above must be pos-1 (or there is none for line 1)."""
+    if seen is not None:
+        return seen == pos
+    return (pos == 1 and not has_above) or (has_above and above == pos - 1)
+
+
+def _check_new_row(ctx: Ctx, item: Item, pos: int) -> None:
+    def probe():
+        g, row = last_line(ctx)
+        above = [x for x in g.rows if x.get("Item No.") and x.y < row.y]
+        return row if is_line(pos, _row_pos(row), _row_pos(above[-1]) if above else None, bool(above)) else None
+
+    row = wait_for(probe, 8, what=f"Order line {pos} for {item.sku}")
+    if not sku_eq(row.get("Item No."), item.sku):
+        raise ManualReview(f"Order line {pos} shows {row.get('Item No.')!r}, expected {item.sku}")
 
 
 def _check_master(ctx: Ctx, item: Item, row: dict) -> None:
     """An existing product's VAT must equal the source VAT (lines inherit it)."""
     if row["vat_value"] is None or abs(Decimal(str(row["vat_value"])) * 100 - item.vat_pct) > Decimal("0.001"):
-        raise ManualReview(f"product {item.sku} has VAT {row['vat_name']}, source says {item.vat_pct}% (line VAT override not automated)")
+        raise ManualReview(
+            f"product {item.sku} has VAT {row['vat_name']}, source says {item.vat_pct}%"
+            " (line VAT override not automated)"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -147,7 +189,9 @@ def create(ctx: Ctx, item: Item) -> None:
     """3.7-3.11."""
     ui = ctx.ui
     vname = ensure_vat(ctx, item.vat_pct)
-    ui.nav("New product")  # 3.7: only after the VAT exists
+    # 3.7, only after the VAT exists. Toolbar, not the nav link: in 2.2.0 the link (CallEditor) throws a
+    # ClassCastException when the last selection was a debtor address from the selector.
+    ui.press("Create a new product")
     wait_for(lambda: ui.active_editor().lstrip("*") == "New product", 10, what="product editor")
     ed = ui.editor_pane()
     ui.set_text(ui.labelled("Item Number", "Edit", root=ed), item.sku)  # 3.8
@@ -188,13 +232,11 @@ def complete_line(ctx: Ctx, item: Item) -> None:
     from pywinauto.keyboard import send_keys
 
     ui = ctx.ui
-    g = read_items(ctx)
-    rows = [r for r in g.rows if r.get("Item No.") == item.sku]
-    if len(rows) != 1:
-        raise ManualReview(f"expected one Order line for {item.sku}, found {len(rows)}")
-    row = rows[0]
 
     def edit_cell(col: str, value: str) -> None:
+        g, row = last_line(ctx)  # re-locate before every edit: Enter can move the table
+        if not sku_eq(row.get("Item No."), item.sku):
+            raise ManualReview(f"bottom Order line shows {row.get('Item No.')!r}, expected {item.sku}")
         x = g.column_x(col)
         if x is None:
             raise AutomationError(f"item column {col!r} not located (have {g.headers})")

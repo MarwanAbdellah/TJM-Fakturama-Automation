@@ -18,7 +18,6 @@ class Ctx:
     order: OrderDraft
     run_dir: Path
     order_no: str = ""  # the "No." Fakturama proposed (PO...)
-    order_db_id: int | None = None
     invoice_no: str = ""
     resume: bool = False
     resume_at: str | None = None  # set by preflight when continuing a stopped run
@@ -77,7 +76,7 @@ class Ctx:
         from pywinauto import mouse
 
         from image2cash.ui import grid as G
-        from image2cash.ui.core import AutomationError, _visible, wait_for
+        from image2cash.ui.core import AutomationError, wait_for
 
         ui = self.ui
         ui.nav("Documents")
@@ -88,7 +87,9 @@ class Ctx:
         ui.click(orders[0])
         _t.sleep(1)
         pane = G.grid_below_search(panel)
-        g = G.read_stable(pane.rectangle(), ["Document", "Date", "Name", "Cust.Ref.", "State", "Total", "Printed"], owner=ui.main)
+        g = G.read_stable(
+            pane.rectangle(), ["Document", "Date", "Name", "Cust.Ref.", "State", "Total", "Printed"], owner=ui.main
+        )
         rows = [r for r in g.rows if r.get("Document") == self.order_no]
         if len(rows) != 1:
             raise AutomationError(f"order {self.order_no} not found in the Documents list")

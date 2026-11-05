@@ -9,6 +9,7 @@ dependencies = [
     "pillow>=10",
     "pydantic>=2.12",
     "pywinauto>=0.6.9",
+    "streamlit>=1.40",
 ]
 
 [project.optional-dependencies]
@@ -18,7 +19,11 @@ llm = ["anthropic>=0.70"]
 image2cash = "image2cash.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=8.3"]
+dev = [
+    "pre-commit>=4.7.0",
+    "pytest>=8.3",
+    "ruff>=0.17.3",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -29,3 +34,11 @@ packages = ["src/image2cash"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E741", "B905", "UP042"]  # `l` = OCR Line; zip lengths are equal by construction; str Enum is intended

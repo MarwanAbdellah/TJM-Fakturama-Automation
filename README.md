@@ -1,218 +1,218 @@
 # Fakturama Image-to-Cash
 
 This tool turns one order image into a saved, verified **Order** and a linked
-**Invoice** in Fakturama 2.2.0. The payment status is applied too. It drives
-Fakturama's real GUI with **Microsoft UI Automation**, uses **local OCR**
-(Indra) for the image and for Fakturama's custom-drawn grids, and verifies
-every step through UI read-back and **read-only** queries on Fakturama's
-HSQLDB.
+**Invoice** in Fakturama 2.2.0, with the payment status applied. It drives
+Fakturama's real GUI with **Microsoft UI Automation** and uses **local OCR**
+(Indra) for the image and for Fakturama's custom-drawn grids. Every step is
+verified through UI read-back and **read-only** queries on Fakturama's HSQLDB.
 
-- Design: [`docs/design.md`](docs/design.md)
-- Review record: [`docs/egm_review.md`](docs/egm_review.md), the
-  Elephant-Goldfish review, its resolutions, and what the live app revealed.
-- Evidence: [`docs/screenshots/`](docs/screenshots), annotated, one per step.
+The tool runs from a **Streamlit app**:
+1. Upload an image.
+2. See what OCR read, with a box drawn around each field.
+3. Correct anything that is wrong.
+4. Preview what will be created and what will be selected.
+5. Press **Proceed**.
 
-## Results (live, against the test workspace)
+It runs from a CLI too.
 
-| Source image | Branches exercised | Outcome |
+- Design: [`docs/design.md`](docs/design.md) (v1) and [`docs/design_v2.md`](docs/design_v2.md) (app, scrolling, USD/pharma data)
+- Review record: [`docs/egm_review.md`](docs/egm_review.md), the Elephant-Goldfish reviews and what the live app revealed
+- Diagrams: [`docs/diagrams/`](docs/diagrams), hand-drawn (architecture, flow, control grounding)
+- Evidence: [`docs/screenshots/`](docs/screenshots), annotated, one per step
+
+## Results (live, test workspace, USD)
+
+The samples are a fictional pharmaceutical distributor's orders (US and Canada,
+billed in USD). They were rendered from the JSON specs in `samples/`. Tax
+rates: 0 % for prescription items and 6.25 % for over-the-counter supplies.
+
+| Image | What it exercises | Outcome |
 |---|---|---|
-| `samples/order_WEB-2026-0714-A17.png` (the assessment image) | New debtor with a **different delivery address**; existing payment method; new VAT 19 %; 2 new products; 10 % line discount; **PAID** | Order **PO000002** (678.30) and Invoice **INV000003**. Paid 2026-07-18, value 678.30, Bank Transfer, linked to the Order. |
-| `samples/order_SO-TEST-0002.png` (synthetic) | New debtor with billing = delivery; **new payment method** (SEPA direct debit, code 59); **new VAT 7 %**; one new and one existing product; mixed VAT; **UNPAID** | Order PO000003 (439.81) and Invoice INV000004, unpaid. |
-| `samples/order_SO-TEST-0003.png` (synthetic) | Existing debtor and product picked from the selectors; one new product; decimal prices; 20 % discount; **PAID** by Credit Card (new payment, code 54) | **One uninterrupted run, 100 s**: Order PO000004 (273.46) and Invoice INV000005, paid 2026-09-23. |
+| `order_RX-1001.png`, Boston pharmacy | New debtor; new product; existing payment and VATs; PAID by Credit Card. **Started from the Streamlit app's Proceed button.** | Order PO000006 and Invoice INV000007, paid, verified. One uninterrupted run. |
+| `order_RX-1002.png`, Toronto distributor | Canadian postal code; different delivery warehouse; PAID by Bank Transfer | Order PO000007 and Invoice INV000008 ($633.76, paid), in one uninterrupted run of 109 s. |
+| `order_RX-1003.png`, Chicago hospital | **8 lines** (the item table scrolls); new VAT 6.25 %; 8 new products; separate delivery address; UNPAID | Order PO000005 and Invoice INV000006 ($2,035.58). This one was built up over several calibration runs (see "found live" below) and finished with `--resume`. |
+| `order_WEB-2026-0714-A17.png`, the assessment's own image (EUR) | Reference input | Booked earlier as PO000002 / INV000003 while the workspace still used its old currency. Under USD it now **stops for manual review**: "order is in EUR, Fakturama books in USD". This is the intended behaviour. |
 
-Some of these results came from more than one run, and the history matters:
-
-- **The assessment image.** It was built up over several calibration runs.
-  During those runs I found a Fakturama bug: Save fails while the "Delivery
-  address" tab is active. I saved that order by hand after selecting the
-  Invoice-address tab, then fixed the code and finished the run with
-  `--resume`.
-- **SO-TEST-0002.** It ran in one go up to the saved Order, then stopped on a
-  bug in my logging code, then finished with `--resume`.
-- **SO-TEST-0003.** It ran with all fixes in place and needed no help.
-
-On every run, each step was checked against the DB (see `runs/*/run.json`).
+Each run writes `runs/<id>/run.json` (every step, the values read back and the
+DB rows) and a set of annotated screenshots.
 
 ## Setup
 
-**Requirements.** Windows 10/11, Fakturama 2.2.0, Python 3.12 and
-[uv](https://docs.astral.sh/uv/).
+**Requirements:** Windows 10/11, Fakturama 2.2.0, Python 3.12, [uv](https://docs.astral.sh/uv/), and Node.js (only to regenerate the diagrams).
 
-1. Use a **copy** of the Fakturama workspace. The run creates real records.
-   Start Fakturama on it, for example:
+1. Use a **copy** of the Fakturama workspace; runs create real records. To book
+   in USD, set `PREFERENCE_CURRENCY_LOCALE=en/US` in
+   `<workspace>/.metadata/.plugins/org.eclipse.core.runtime/.settings/com.sebulli.fakturama.rcp.prefs`.
+   Do this **while Fakturama is closed**, because it rewrites the file on exit.
+   Then start Fakturama on that workspace:
    ```bash
    "D:/Fakturama/Fakturama2/Fakturama.exe" -data "C:/Users/<you>/.fakturama2_test"
    ```
-   The automation attaches to the running window. While Fakturama is open,
-   HSQLDB listens on `localhost:9001`.
-2. Install the dependencies:
+2. Install the dependencies. The first OCR call downloads Indra's models.
    ```bash
    uv sync
    ```
-   The first OCR call downloads Indra's models, about 12 files.
-3. Paths are set in `src/image2cash/config.py`. Override them with
-   environment variables: `FAKTURAMA_HOME`, `HSQL_URL`, `HSQL_JAR`.
-   The JDBC driver and the JRE are taken from the Fakturama install.
+3. Paths live in `src/image2cash/config.py`. Override them with the environment
+   variables `FAKTURAMA_HOME`, `HSQL_URL` and `HSQL_JAR`.
 
 ## Run
 
+**The app** (on the PC running Fakturama, at localhost:8501):
 ```bash
-uv run image2cash extract samples/order_WEB-2026-0714-A17.png
+uv run streamlit run app/streamlit_app.py
 ```
-This only reads the image and validates it. It prints the JSON and the
-validation result, and does not touch the UI.
+After you press Proceed, don't touch the mouse or keyboard until the page shows the result.
 
+**CLI:** OCR and validate an image only.
 ```bash
-uv run image2cash run samples/order_WEB-2026-0714-A17.png
+uv run image2cash extract samples/order_RX-1001.png
 ```
-This runs the full flow. Do not use the mouse or keyboard while it runs.
-
+**CLI:** run the full flow.
+```bash
+uv run image2cash run samples/order_RX-1001.png
+```
+**CLI:** run a reviewed or edited draft.
+```bash
+uv run image2cash run --draft runs/<id>/draft.json
+```
+**CLI:** continue after the Order was saved.
 ```bash
 uv run image2cash run <image> --resume
 ```
-This continues a stopped run whose Order is already saved. It verifies the
-Order, then creates and pays the Invoice.
-
+**CLI:** read-only DB view of the documents for a reference.
 ```bash
-uv run image2cash verify WEB-2026-0714-A17
+uv run image2cash verify RX-1001
 ```
-This prints a read-only DB view of the documents for that reference.
 
+**Tests and hooks:** 59 unit tests, plus ruff and hygiene hooks; pytest also runs on push.
 ```bash
 uv run pytest -q
 ```
-This runs the 35 unit tests: extraction from a recorded OCR fixture,
-validation, and the grid, date and selector helpers.
-
 ```bash
-uv run python tools/make_sample.py samples/order_SO-TEST-0002.json
+uv run pre-commit install --install-hooks -t pre-commit -t pre-push
 ```
-This renders a synthetic test order.
 
-Exit codes:
+**Tools:** render a synthetic order from a JSON spec.
+```bash
+uv run python tools/make_sample.py samples/order_RX-1003.json
+```
+Regenerate the hand-drawn diagrams:
+```bash
+cd tools/diagrams && npm install && node make_diagrams.mjs
+```
+
+**Exit codes:**
 
 | Code | Meaning |
 |---|---|
-| `0` | Done and verified |
-| `1` | Automation error |
-| `2` | Stopped for manual review; the UI is left as-is |
-| `3` | Source image rejected by validation; nothing touched |
-
-Each run writes `runs/<timestamp>/run.json`, `order.json` and annotated
-`screenshots/`.
+| 0 | Done and verified |
+| 1 | Automation error |
+| 2 | Stopped for manual review (the UI is left as it is) |
+| 3 | Source rejected; nothing was touched |
+| 4 | Another run is in progress (one run at a time, enforced by an OS file lock) |
 
 ## How it works (short)
 
-1. **Extract.** Indra OCR gives text with boxes. A label-anchored parser maps
-   them to an `OrderDraft`; values are located relative to their printed
-   labels, with no fixed coordinates. Arithmetic cross-checks (line totals,
-   net, VAT per rate, gross) reject misreads before the UI is touched.
-2. **Ground.** Controls are found by UIA name (toolbar tooltips, nav links,
-   named edits and checkboxes). If there is no name, the control is found from
-   its label (nearest field to the right or below; N-th icon beside a label).
-   Combos are found by their options. Fakturama's custom-drawn NatTable grids
-   are read by OCR inside the rectangle UIA reports. Columns come from the
-   drawn grid lines, and clicks go to cell centres computed in the same run.
-3. **Decide.** "Exact match" for debtor, product, VAT and payment method is a
-   read-only DB count:
-   - 0 → create;
-   - 1 → select in the Order's selector;
+1. **Extract.**
+   - Indra OCR gives text with boxes. A label-anchored parser maps them to an
+     `OrderDraft` and records each field's box (the app draws these).
+   - US and Canadian address lines (`Boston, MA 02116`, `Toronto, ON M5J 2S1`)
+     and German ones (`10117 Berlin`) are both parsed.
+   - Arithmetic checks reject misreads before the UI is touched: line totals,
+     net, VAT rounded per rate, and gross.
+2. **Ground.**
+   - Controls are found by UIA name, or failing that from their label, or by
+     the options a combo offers.
+   - Fakturama's custom-drawn grids are read by OCR inside the rectangle UIA
+     reports. Columns come from the drawn grid lines, named by position.
+   - Clicks use cell centres computed in the same run.
+3. **Decide.** Whether a debtor, product, VAT or payment method already exists
+   is a read-only DB count:
+   - 0 → create it;
+   - 1 → select it in the Order's selector;
    - 2 or more → manual review.
+4. **Verify.**
+   - Every typed value is read back.
+   - After each line, the running `Total Net` must match.
+   - Before saving, the totals must equal the image.
+   - After each Save, the DB row is checked.
+   - At the end: the Invoice is linked to the Order; the paid flag, date, value
+     and method are right; the Order is unchanged and still open.
 
-   The selector is still used as the brief requires; the DB only decides
-   whether a match is exact.
-4. **Verify.** Every typed value is read back. Lines are checked against the
-   running `Total Net`, and the totals against the source. After each Save
-   the DB row is checked. The final checks are:
-   - the Invoice is linked to the Order;
-   - paid flag, pay date, paid value and payment method are correct;
-   - the Order is unchanged and still open.
+## Fakturama behaviours found live, and how they are handled
 
-## Fakturama behaviours handled (found during calibration)
+| Behaviour | Handling |
+|---|---|
+| Save throws an NPE when the dynamically added "Delivery address" tab is active (`DocumentEditor.doSave`; the same error appears in the brief's figures) | Select the Invoice-address tab before saving any document |
+| The "New product" link throws a ClassCastException (`CallEditor`) after a debtor address was picked in a selector | Use the toolbar's "Create a new product" button |
+| Selectors auto-accept as soon as the filter leaves one row | Paste the whole search term at once |
+| The Debtor editor loads its Payment list only when it opens | Ensure the payment method *before* opening New Debtor (a documented deviation from brief 2.10) |
+| The item table gets its own scrollbar after about 7 rows; the scrollbar buttons ignore UIA Invoke | Maximize the editor area; scroll with the mouse wheel over the grid, and stop if the editor itself moved; the newest line must be the bottom row with `Pos.` = line number |
+| Header captions on gray are faint, so OCR reads only some of them | Columns come from drawn grid lines and are named by a majority vote of the captions that were read |
+| Segmented date fields | Find each segment by pressing Up and seeing what changed, type the digits, read back |
+| Locale differences | Form fields parse in the UI locale; grid cells always take `.` |
+| The e-mail validator rejects `.test` domains | Detected in the DB and reported as a warning (samples use `example.com`) |
+| "Save Parts" ignores programmatic unchecking | Click the checkbox glyph and verify; cancel if that fails |
 
-- **Save NPE.** Saving a document while the dynamically added "Delivery
-  address" tab is active throws a NullPointerException in
-  `DocumentEditor.doSave`. The same "Failed to persist contents of part" error
-  appears in the brief's figures. Fix: select the Invoice-address tab before
-  saving.
-- **Selector auto-accept.** The selectors auto-accept as soon as the filter
-  leaves one row. Fix: search terms are pasted whole, never typed key by key.
-- **Payment list not refreshed.** The Debtor editor loads its Payment list
-  once, when it opens. Fix: the payment method is ensured *before* New Debtor
-  opens. This is a documented deviation from the order in brief 2.10; the
-  Order stays open either way.
-- **Segmented dates.** Date fields only take keyboard input one segment at a
-  time. WM_SETTEXT changes the display but not the model.
-- **Locale.** This workspace's ps/AF locale shows Persian digits. Form fields
-  need the `٫` decimal separator, while grid cells need `.`.
-- **E-mail validator.** Fakturama's validator rejects `example.test` addresses
-  and stores no e-mail. This is detected in the DB and reported as a warning.
-- **Save Parts.** The "Save Parts" dialog ignores programmatic unchecking, so
-  the checkbox glyph is clicked and the state verified.
+## What is skipped or simplified
 
-## What is not done / simplified
-
-- The vision-LLM second opinion for extraction is designed (`docs/design.md`
-  §3) but not built. OCR and the arithmetic checks were sufficient for the
-  samples.
-- Line-level VAT override is not automated. An existing product whose VAT
-  differs from the source goes to manual review.
-- Order-level discount and shipping values in an image are not mapped. The
-  flow enforces 0 % / free shipping, as brief 4.2 states for images without
-  them.
-- There is no generic watcher for unexpected dialogs. The known dialogs are
+- **The vision-LLM second opinion for extraction** is designed but not built.
+  The parser handles this document family; other layouts would need it.
+- **Line-level VAT override** is not automated. An existing product whose VAT
+  differs from the image stops for manual review.
+- **Order-level discount and shipping** from an image are not mapped. 0 % and
+  free shipping are enforced (brief 4.2).
+- **Selector dialogs do not scroll.** If a search fills the whole list, the run
+  stops for review (`shortcut:` comment in `steps/selector.py`). Exact SKU and
+  company searches rarely do.
+- **No generic watcher for unexpected dialogs.** The known dialogs are
   handled; anything else times out with a screenshot.
-- The parser handles this document family, with its labelled sections. Other
-  layouts would need the LLM path.
-- Resume covers "Order saved, Invoice not yet". An earlier stop needs the
-  unsaved Order discarded and a rerun. Master data created before the stop is
-  reused on the rerun, because exact matches are then found.
-- The run needs an unattended desktop: it captures the screen and moves the
-  mouse.
+- **Resume only covers "Order saved, Invoice not yet".** An earlier stop needs
+  the unsaved Order discarded and a rerun; master data created before the stop
+  is reused.
+- **Speed:** a line takes about 15 s, because the item grid is re-read by OCR
+  before every cell edit. This is deliberate: an Enter can move the table.
+- **No cleanup or rollback** of a failed run's records.
+- **The app is local only.** It has no authentication and serves one user, so
+  don't expose it. The run moves the real mouse, so the desktop must stay
+  unlocked and untouched.
 
 ## Written question: with 3 more hours
 
-1. **Harden recovery.** Add a dialog watcher that runs between actions and
-   classifies or aborts unknown modals. Make resume work from every step,
-   driven by `run.json` and DB state. Add a `--cleanup` that soft-deletes this
-   run's records through the UI.
-2. **LLM cross-check.** Add a schema-constrained vision-LLM extraction behind a
-   flag, with a normalized field-by-field diff against OCR. Disagreement on a
-   key or money field goes to manual review. This also makes the tool robust
-   to other order layouts.
-3. **More test coverage.** Generate a batch of synthetic orders (the renderer
-   exists) covering ambiguous debtors, duplicate SKUs, VAT conflicts, unknown
-   payment methods and three or more lines that need scrolling the item table.
-   Run them nightly against a disposable workspace copy, restored from a
-   zipped baseline before each run.
-4. **Line-level VAT.** Set the in-cell VAT combo when an existing product's
-   VAT differs, instead of stopping for review.
-5. **Speed.** Cache the UIA subtree per editor and replace fixed settle sleeps
-   with event waits. Today a full run takes about 100 s.
+1. **Recovery.** Watch for dialogs between actions. Resume from any step using
+   `run.json` and the DB state. Add a `--cleanup` that soft-deletes a run's
+   records through the UI.
+2. **LLM cross-check.** A schema-constrained vision extraction behind a flag,
+   diffed field by field against OCR, so other layouts work too.
+3. **Batch regression.** Render a few dozen synthetic orders covering ambiguous
+   debtors, VAT conflicts and long orders. Run them nightly against a workspace
+   restored from a zipped baseline.
+4. **Speed.** Reuse a grid read until the header actually moves. Replace fixed
+   sleeps with event waits.
 
 ## Repository layout
 
 ```
+app/streamlit_app.py     upload → boxes → review → preview → proceed → live log → result
 src/image2cash/
-  extract/   ocr.py (Indra + boxes), layout.py (label-anchored parser)
-  ui/        core.py (locators, actions, editors, screenshots), grid.py (OCR grids),
-             datefield.py (segmented date entry)
+  extract/   ocr.py (Indra + boxes), layout.py (label-anchored parser, field boxes)
+  ui/        core.py (locators, editors, screenshots), grid.py (OCR grids), datefield.py
   steps/     order.py, debtor.py, product.py, invoice.py, selector.py, context.py
   verify/    db.py (read-only HSQLDB)
-  models.py  validate.py  flow.py  cli.py  config.py
-tests/       35 unit tests + recorded OCR fixture
-tools/       make_sample.py (synthetic order renderer)
-samples/     assessment image + two synthetic orders (JSON specs + PNG)
-docs/        design.md, egm_review.md, screenshots/
+  models.py  validate.py  flow.py (state machine, run lock)  cli.py  config.py
+tests/       59 unit tests + recorded OCR fixture
+tools/       make_sample.py (order renderer), diagrams/ (rough.js)
+samples/     pharma orders (JSON spec + PNG) + the assessment image
+docs/        design.md, design_v2.md, egm_review.md, PLAN_v2.md, diagrams/, screenshots/
 ```
 
-## About the Elephant-Goldfish Model
+## Tooling used
 
-The design was drafted and stress-tested with Google's EGM method. A
-context-rich "elephant" agent drafted it; two zero-context "goldfish" reviewer
-subagents critiqued it; the findings were resolved and the risky mechanics
-spiked before implementation. See `docs/egm_review.md`.
-
-The EGM plugin was not installed into Claude Code. Local policy requires an
-NVIDIA SkillSpector scan of any plugin first, and installing the scanner was
-blocked here. The workflow was applied by hand instead.
+- **Elephant-Goldfish Model (EGM).** The designs were drafted with full
+  context, then reviewed by zero-context "goldfish" subagents: twice for v1 by
+  hand, and twice for v2 with the installed plugin's `egm-design` and
+  `egm-implementation-readiness` reviewers. Findings and resolutions are in
+  `docs/egm_review.md` and `docs/design_v2.md` §6.
+- **Ponytail.** A whole-repo audit removed dead helpers and unused options,
+  fixed silently dropped address lines and added tests for the rules that
+  guard identity, currency and idempotency.

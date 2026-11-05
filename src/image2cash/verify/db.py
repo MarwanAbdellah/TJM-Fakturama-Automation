@@ -12,11 +12,12 @@ All writes happen through Fakturama's UI.
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from image2cash import config
 
@@ -95,7 +96,7 @@ def contacts_matching(company: str, first: str, last: str, zip_: str, city: str)
         'SELECT c."ID", c."CUSTOMERNUMBER", c."COMPANY", c."FIRSTNAME", c."NAME", '
         'a."ID", a."STREET", a."ZIP", a."CITY", a."COUNTRYCODE", c."FK_PAYMENT" '
         'FROM "FKT_CONTACT" c JOIN "FKT_ADDRESS" a ON a."CONTACT_ADDRESSES" = c."ID" '
-        f'WHERE c."DTYPE" = \'Debitor\' AND {live("c")} AND {live("a")} '
+        f"WHERE c.\"DTYPE\" = 'Debitor' AND {live('c')} AND {live('a')} "
         'AND TRIM(c."COMPANY") = ? AND TRIM(c."FIRSTNAME") = ? AND TRIM(c."NAME") = ? '
         'AND TRIM(a."ZIP") = ? AND TRIM(a."CITY") = ?',
         (company.strip(), first.strip(), last.strip(), zip_.strip(), city.strip()),
@@ -104,22 +105,40 @@ def contacts_matching(company: str, first: str, last: str, zip_: str, city: str)
     for cid, num, comp, fn, nm, aid, street, z, ct, cc, pay in rows:
         if cid in out:
             continue
-        out[cid] = ContactRow(cid, num or "", comp or "", fn or "", nm or "", aid, street or "", z or "", ct or "", cc or "", address_types(aid), pay)
+        out[cid] = ContactRow(
+            cid,
+            num or "",
+            comp or "",
+            fn or "",
+            nm or "",
+            aid,
+            street or "",
+            z or "",
+            ct or "",
+            cc or "",
+            address_types(aid),
+            pay,
+        )
     return list(out.values())
 
 
 def contact_addresses(contact_id: int) -> list[dict]:
     rows = query(
-        'SELECT "ID", "NAME", "STREET", "ZIP", "CITY", "COUNTRYCODE", "EMAIL", "PHONE" '
+        'SELECT "ID", "NAME", "STREET", "ZIP", "CITY", "COUNTRYCODE", "EMAIL", "PHONE", "ADDRESSADDON" '
         f'FROM "FKT_ADDRESS" WHERE "CONTACT_ADDRESSES" = ? AND {live()} ORDER BY "ID"',
         (contact_id,),
     )
-    keys = ("id", "name", "street", "zip", "city", "country", "email", "phone")
+    keys = ("id", "name", "street", "zip", "city", "country", "email", "phone", "spec")
     return [dict(zip(keys, r), types=address_types(r[0])) for r in rows]
 
 
 def address_types(address_id: int) -> list[str]:
-    return [r[0] for r in query('SELECT "T_ELEMENT" FROM "FKT_ADDRESS_CONTACTTYPES" WHERE "ADDRESS_CONTACTTYPES" = ?', (address_id,))]
+    return [
+        r[0]
+        for r in query(
+            'SELECT "T_ELEMENT" FROM "FKT_ADDRESS_CONTACTTYPES" WHERE "ADDRESS_CONTACTTYPES" = ?', (address_id,)
+        )
+    ]
 
 
 def contact(contact_id: int) -> dict | None:
@@ -163,16 +182,6 @@ def products_with_sku(sku: str) -> list[dict]:
     return [dict(zip(keys, r)) for r in rows]
 
 
-def products_containing(term: str) -> int:
-    """How many live products the selector's search would plausibly show."""
-    t = f"%{term.strip()}%"
-    return query(
-        'SELECT COUNT(*) FROM "FKT_PRODUCT" WHERE (ITEMNUMBER LIKE ? OR NAME LIKE ? '
-        f'OR CAST(DESCRIPTION AS VARCHAR(4000)) LIKE ?) AND {live()}',
-        (t, t, t),
-    )[0][0]
-
-
 # ---- documents --------------------------------------------------------------
 def documents_with_ref(cust_ref: str, dtype: str | None = None) -> list[dict]:
     sql = (
@@ -185,8 +194,22 @@ def documents_with_ref(cust_ref: str, dtype: str | None = None) -> list[dict]:
         sql += ' AND "DTYPE" = ?'
         params += (dtype,)
     keys = (
-        "id", "number", "dtype", "cust_ref", "date", "order_date", "total", "paid", "pay_date",
-        "paid_value", "payment_id", "src_id", "contact_id", "delivery_contact_id", "net_gross", "progress",
+        "id",
+        "number",
+        "dtype",
+        "cust_ref",
+        "date",
+        "order_date",
+        "total",
+        "paid",
+        "pay_date",
+        "paid_value",
+        "payment_id",
+        "src_id",
+        "contact_id",
+        "delivery_contact_id",
+        "net_gross",
+        "progress",
     )
     out = []
     for r in query(sql + ' ORDER BY "ID"', params):

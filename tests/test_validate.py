@@ -9,7 +9,6 @@ from image2cash.validate import (
     gross_price,
     line_net,
     parse_amount,
-    same_text,
     totals,
     vat_name,
 )
@@ -26,8 +25,26 @@ def make(**over) -> OrderDraft:
         debtor=Debtor(company="Co", first_name="A", last_name="B", billing=addr, delivery=addr),
         payment=Payment(method="Bank Transfer", status=PaidStatus.PAID, paid_date=date(2026, 7, 18)),
         items=[
-            Item(pos=1, sku="X", description="x", qty=D(2), unit_net=D("250"), discount_pct=D(10), vat_pct=D(19), line_net=D("450")),
-            Item(pos=2, sku="Y", description="y", qty=D(3), unit_net=D("40"), discount_pct=D(0), vat_pct=D(19), line_net=D("120")),
+            Item(
+                pos=1,
+                sku="X",
+                description="x",
+                qty=D(2),
+                unit_net=D("250"),
+                discount_pct=D(10),
+                vat_pct=D(19),
+                line_net=D("450"),
+            ),
+            Item(
+                pos=2,
+                sku="Y",
+                description="y",
+                qty=D(3),
+                unit_net=D("40"),
+                discount_pct=D(0),
+                vat_pct=D(19),
+                line_net=D("120"),
+            ),
         ],
         net_total=D("570.00"),
         vat_total=D("108.30"),
@@ -48,10 +65,30 @@ def test_brief_formulas():
 def test_vat_rounded_per_rate_group():
     o = make(
         items=[
-            Item(pos=1, sku="L", description="l", qty=D(4), unit_net=D(35), discount_pct=D(5), vat_pct=D(7), line_net=D(133)),
-            Item(pos=2, sku="C", description="c", qty=D(1), unit_net=D(250), discount_pct=D(0), vat_pct=D(19), line_net=D(250)),
+            Item(
+                pos=1,
+                sku="L",
+                description="l",
+                qty=D(4),
+                unit_net=D(35),
+                discount_pct=D(5),
+                vat_pct=D(7),
+                line_net=D(133),
+            ),
+            Item(
+                pos=2,
+                sku="C",
+                description="c",
+                qty=D(1),
+                unit_net=D(250),
+                discount_pct=D(0),
+                vat_pct=D(19),
+                line_net=D(250),
+            ),
         ],
-        net_total=D("383.00"), vat_total=D("56.81"), gross_total=D("439.81"),
+        net_total=D("383.00"),
+        vat_total=D("56.81"),
+        gross_total=D("439.81"),
     )
     assert totals(o) == (D("383.00"), D("56.81"), D("439.81"))
     assert check_order(o) == []
@@ -96,8 +133,3 @@ def test_duplicate_sku():
 )
 def test_parse_amount(text, value):
     assert parse_amount(text) == value
-
-
-def test_same_text_is_case_sensitive_but_whitespace_tolerant():
-    assert same_text(" Northstar  Office ", "Northstar Office")
-    assert not same_text("northstar office", "Northstar Office")

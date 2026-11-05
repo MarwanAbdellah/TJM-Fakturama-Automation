@@ -22,8 +22,18 @@ MONTHS = {
     m: i + 1
     for i, names in enumerate(
         [
-            ("jan",), ("feb",), ("mar",), ("apr",), ("may",), ("jun",),
-            ("jul",), ("aug",), ("sep", "sept"), ("oct",), ("nov",), ("dec",),
+            ("jan",),
+            ("feb",),
+            ("mar",),
+            ("apr",),
+            ("may",),
+            ("jun",),
+            ("jul",),
+            ("aug",),
+            ("sep", "sept"),
+            ("oct",),
+            ("nov",),
+            ("dec",),
         ]
     )
     for m in names

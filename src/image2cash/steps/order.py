@@ -11,6 +11,14 @@ from image2cash.ui.datefield import set_date
 from image2cash.validate import money, parse_amount, totals
 from image2cash.verify import db
 
+# shortcut: sign -> ISO code for the locales seen so far; extend when another currency shows up.
+CURRENCY_SIGNS = {"$": "USD", "€": "EUR", "£": "GBP", "؋": "AFN"}
+
+
+def booked_currency(display: str) -> str | None:
+    """ISO code of the currency sign Fakturama shows in an amount field, if known."""
+    return next((CURRENCY_SIGNS[c] for c in display if c in CURRENCY_SIGNS), None)
+
 
 def preflight(ctx: Ctx) -> None:
     """Idempotency: never create a second Order/Invoice for the same reference.
@@ -66,6 +74,13 @@ def open_order(ctx: Ctx) -> None:
 
     total = ui.labelled("Total", "Edit", root=ed)
     ui.learn_locale(read(total))
+    booked = booked_currency(read(total))
+    if booked and booked != o.currency:
+        raise ManualReview(f"order is in {o.currency}, Fakturama books in {booked}")
+    # More rows visible before the item table needs its own scrollbar.
+    maxi = [b for b in ui._editor_folder().descendants(control_type="Button") if b.element_info.name == "Maximize"]
+    if maxi:
+        maxi[0].invoke()
     ctx.record(
         "1 open order",
         "ok",
@@ -152,7 +167,6 @@ def verify_saved_order(ctx: Ctx) -> None:
     if len(docs) != 1:
         raise AutomationError(f"expected one saved Order, DB has {len(docs)}")
     d = docs[0]
-    ctx.order_db_id = d["id"]
     items = db.document_items(d["id"])
     checks = {
         "number": d["number"] == ctx.order_no,
@@ -164,7 +178,9 @@ def verify_saved_order(ctx: Ctx) -> None:
         checks[f"item {src.pos} sku"] = it["sku"] == src.sku
         checks[f"item {src.pos} qty"] = money(it["qty"]) == money(src.qty)
         checks[f"item {src.pos} price"] = abs(it["price"] - src.unit_net) < Decimal("0.005")
-        checks[f"item {src.pos} discount"] = abs(abs(it["rebate"]) * 100 - src.discount_pct) < Decimal("0.01") or abs(abs(it["rebate"]) - src.discount_pct) < Decimal("0.01")
+        checks[f"item {src.pos} discount"] = abs(abs(it["rebate"]) * 100 - src.discount_pct) < Decimal("0.01") or abs(
+            abs(it["rebate"]) - src.discount_pct
+        ) < Decimal("0.01")
         checks[f"item {src.pos} vat"] = abs(it["vat_value"] * 100 - src.vat_pct) < Decimal("0.001")
     failed = [k for k, v in checks.items() if not v]
     ui.nav("Documents")

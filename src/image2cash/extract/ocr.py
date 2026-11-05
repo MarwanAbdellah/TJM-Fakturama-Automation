@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
@@ -29,7 +29,7 @@ class Line:
     def h(self) -> float:
         return self.y1 - self.y0
 
-    def overlaps_x(self, other: "Line | tuple[float, float]", slack: float = 0) -> float:
+    def overlaps_x(self, other: Line | tuple[float, float], slack: float = 0) -> float:
         lo, hi = (other.x0, other.x1) if isinstance(other, Line) else other
         return max(0.0, min(self.x1, hi + slack) - max(self.x0, lo - slack))
 
@@ -49,10 +49,7 @@ def ocr_image(path: str | Path) -> tuple[list[Line], tuple[int, int]]:
     with Image.open(path) as img:
         size = img.size
     for _, page in _engine().convert(str(path), max_pages=1):
-        lines = [
-            Line(l.text.strip(), float(l.conf), *(float(v) for v in l.box))
-            for l in page.lines
-        ]
+        lines = [Line(l.text.strip(), float(l.conf), *(float(v) for v in l.box)) for l in page.lines]
         return lines, size
     return [], size
 
@@ -68,14 +65,7 @@ def ocr_pil(img, scratch: Path, scale: int = 2) -> list[Line]:
     big = img.resize((img.width * scale, img.height * scale), Image.LANCZOS)
     big.save(scratch)
     lines, _ = ocr_image(scratch)
-    return [
-        Line(l.text, l.conf, l.x0 / scale, l.y0 / scale, l.x1 / scale, l.y1 / scale)
-        for l in lines
-    ]
-
-
-def dump(lines: list[Line], path: Path) -> None:
-    path.write_text(json.dumps([asdict(l) for l in lines], indent=1), encoding="utf-8")
+    return [Line(l.text, l.conf, l.x0 / scale, l.y0 / scale, l.x1 / scale, l.y1 / scale) for l in lines]
 
 
 def load(path: Path) -> list[Line]:

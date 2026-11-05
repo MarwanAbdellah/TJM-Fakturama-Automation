@@ -65,3 +65,41 @@ run `claude plugin marketplace add google/elephant-goldfish-model`, then
 - **E-mail validation.** Fakturama's e-mail validator rejects `example.test`
   and silently stores no e-mail. The DB check detects this and reports it as a
   warning.
+
+## v2 round (Streamlit app, scrolling, USD/pharma data)
+
+This time the installed EGM plugin's reviewer agents were used, so its own
+prompts applied: `egm-design` and `egm-implementation-readiness`, each in a
+fresh context. They produced 20 findings. All resolutions are in
+`design_v2.md` §6. The ones that changed the design most:
+
+- **Stop over-engineering the scroll fix.** The flow only edits the newest
+  line, so a "merge pages by Pos." reader was unnecessary. The result: scroll
+  to the bottom, then check that the bottom row's `Pos.` equals the line number.
+- **Booking the EUR reference image under a USD workspace would book wrong
+  amounts.** Fix: a currency guard in `open_order`, which raises ManualReview.
+- **A 7-line sample could not be rendered.** The renderer's totals box was at a
+  fixed height. The renderer's VAT rounding also differed from the validator's.
+- **The run lock and resume semantics were vague.** The OS file lock is now
+  held by the run process itself, and `run --draft ... --resume` was added.
+
+Found only live, after the reviews:
+
+- **"New product" link crash.** The navigation link throws a
+  ClassCastException after a selector pick. The toolbar button works.
+- **Item-table scrollbar.** The scrollbar buttons ignore UIA Invoke, and the
+  UIA "Page down" region is missing when the overflow is small. Mouse-wheel
+  scrolling works.
+- **Faint headers.** OCR reads only some header captions. Columns are now named
+  by a majority-offset vote over the drawn grid lines.
+- **Editor-folder detection.** When the editor area is maximized, the Documents
+  view floats over it at the same top edge. The editor folder is now found as
+  the folder that holds the "Fakturama" start page.
+- **OCR character swaps** in grid cells: `S`/`5` in Canadian postal codes,
+  `O`/`0` in customer numbers. One shared OCR-tolerant comparison now handles
+  them. Identity is still decided by the DB.
+
+**Verdict on EGM, second use.** The goldfish reviews again earned their cost
+(about 2 minutes, about 140k tokens) by catching design-level mistakes
+cheaply. As in v1, every expensive problem came from the live app, not from
+review.

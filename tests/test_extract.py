@@ -32,7 +32,11 @@ def test_debtor(order):
     assert d.email == "marta.klein@example.test"
     assert d.phone == "+49 30 5550 1420"
     assert (d.billing.street, d.billing.zip, d.billing.city, d.billing.country) == (
-        "Friedrichstrasse 88", "10117", "Berlin", "Germany")
+        "Friedrichstrasse 88",
+        "10117",
+        "Berlin",
+        "Germany",
+    )
     assert d.delivery.name == "Northstar Office Warehouse"
     assert (d.delivery.street, d.delivery.zip) == ("Beusselstrasse 44", "10553")
     assert not d.same_delivery
@@ -49,14 +53,29 @@ def test_items_including_textless_headers(order):
     # text; their columns are still recovered from the header boxes.
     a, b = order.items
     assert (a.sku, a.description, a.qty, a.unit_net, a.discount_pct, a.vat_pct, a.line_net) == (
-        "CHR-ERG-01", "Ergonomic Desk Chair", Decimal(2), Decimal("250.00"), Decimal(10), Decimal(19), Decimal("450.00"))
+        "CHR-ERG-01",
+        "Ergonomic Desk Chair",
+        Decimal(2),
+        Decimal("250.00"),
+        Decimal(10),
+        Decimal(19),
+        Decimal("450.00"),
+    )
     assert (b.sku, b.qty, b.unit_net, b.discount_pct, b.line_net) == (
-        "MAT-DESK-02", Decimal(3), Decimal("40.00"), Decimal(0), Decimal("120.00"))
+        "MAT-DESK-02",
+        Decimal(3),
+        Decimal("40.00"),
+        Decimal(0),
+        Decimal("120.00"),
+    )
 
 
 def test_totals_and_validation(order):
     assert (order.net_total, order.vat_total, order.gross_total) == (
-        Decimal("570.00"), Decimal("108.30"), Decimal("678.30"))
+        Decimal("570.00"),
+        Decimal("108.30"),
+        Decimal("678.30"),
+    )
     assert check_order(order) == []
 
 
@@ -85,3 +104,34 @@ def test_missing_label_fails_loudly():
     lines = [l for l in load(FIXTURE) if l.text != "PAYMENT METHOD"]
     with pytest.raises(ExtractionError, match="PAYMENT METHOD"):
         parse(lines)
+
+
+def test_boxes_recorded_per_field():
+    boxes: dict = {}
+    parse(load(FIXTURE), boxes=boxes)
+    for key in (
+        "external_ref",
+        "debtor.company",
+        "debtor.billing",
+        "payment.method",
+        "net_total",
+        "items.1.sku",
+        "items.2.line_net",
+    ):
+        assert boxes.get(key), key
+    assert len(boxes["debtor.billing"]) == 4  # name, street, zip/city, country
+
+
+@pytest.mark.parametrize(
+    "line, expected",
+    [
+        ("Boston, MA 02118", ("02118", "Boston, MA")),
+        ("Toronto, ON M5V 2T6", ("M5V 2T6", "Toronto, ON")),
+        ("New York, NY 10001-2345", ("10001-2345", "New York, NY")),
+        ("10117 Berlin", ("10117", "Berlin")),
+    ],
+)
+def test_city_lines(line, expected):
+    from image2cash.extract.layout import split_city_line
+
+    assert split_city_line(line) == expected

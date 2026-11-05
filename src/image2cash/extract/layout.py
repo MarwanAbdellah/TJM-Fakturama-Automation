@@ -55,6 +55,11 @@ class Page:
             raise ExtractionError("OCR returned no text")
         self.lh = median(l.h for l in self.lines)
         self.min_conf = min(l.conf for l in self.lines)
+        self.boxes: dict[str, list[list[float]]] = {}  # field key -> source boxes (for the UI)
+
+    def keep(self, key: str | None, lines: list[Line]) -> None:
+        if key:
+            self.boxes.setdefault(key, []).extend([l.x0, l.y0, l.x1, l.y1] for l in lines)
 
     def label(self, name: str) -> Line:
         hits = [l for l in self.lines if _norm(l.text) == name]
@@ -88,10 +93,11 @@ class Page:
                 break
         return out
 
-    def value(self, name: str) -> str:
+    def value(self, name: str, key: str | None = None) -> str:
         found = self.below(self.label(name))
         if not found:
             raise ExtractionError(f"no value under {name!r}")
+        self.keep(key, found[:1])
         return found[0].text.strip()
 
 
@@ -110,15 +116,29 @@ def _dec(text: str, field: str) -> Decimal:
         raise ExtractionError(f"{field}: {text!r} is not a number") from exc
 
 
-def _address(page: Page, label: str) -> Address:
-    block = [l.text.strip() for l in page.below(page.label(label), max_lines=8, max_gap=2.5)]
+# 'Boston, MA 02118' / 'Toronto, ON M5V 2T6' first, then 'ZIP City' (German style).
+_US_CA = re.compile(r"^(.+?),\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?|[A-Z]\d[A-Z] ?\d[A-Z]\d)$")
+_ZIP_CITY = re.compile(r"^(\S+)\s+(.+)$")
+
+
+def split_city_line(line: str) -> tuple[str, str]:
+    """-> (zip, city). Fakturama has no state field, so the state stays on the city: 'Boston, MA'."""
+    if m := _US_CA.match(line):
+        return m[3], f"{m[1]}, {m[2]}"
+    if m := _ZIP_CITY.match(line):
+        return m[1], m[2]
+    raise ExtractionError(f"cannot split ZIP/City from {line!r}")
+
+
+def _address(page: Page, label: str, key: str) -> Address:
+    found = page.below(page.label(label), max_lines=8, max_gap=4)  # the next section label ends the block anyway
+    block = [l.text.strip() for l in found]
     if len(block) < 4:
         raise ExtractionError(f"{label}: expected >= 4 lines, got {block}")
+    page.keep(key, found)
     name, street, *middle, zip_city, country = block
-    m = re.match(r"^(\S+)\s+(.+)$", zip_city)
-    if not m:
-        raise ExtractionError(f"{label}: cannot split ZIP/City from {zip_city!r}")
-    return Address(name=name, street=street, zip=m[1], city=m[2], country=country, extra_lines=middle)
+    zip_, city = split_city_line(zip_city)
+    return Address(name=name, street=street, zip=zip_, city=city, country=country, extra_lines=middle)
 
 
 _ITEM_HEADERS = {
@@ -172,15 +192,20 @@ def _items(page: Page) -> list[Item]:
     items = []
     for row in rows:
         cells: dict[str, str] = {}
+        where: dict[str, list[Line]] = {}
         for l in row:
             key = max(spans, key=lambda s: l.overlaps_x((s[1], s[2])))[0]
             cells[key] = (cells.get(key, "") + " " + l.text).strip()
+            where.setdefault(key, []).append(l)
         if not cells.get("sku"):
             continue
         n = len(items) + 1
+        pos = int(cells["pos"]) if cells.get("pos", "").isdigit() else n
+        for col, ls in where.items():
+            page.keep(f"items.{pos}.{col}", ls)
         items.append(
             Item(
-                pos=int(cells["pos"]) if cells.get("pos", "").isdigit() else n,
+                pos=pos,
                 sku=cells["sku"],
                 description=cells.get("description", ""),
                 qty=_dec(cells.get("qty", ""), f"item {n} qty"),
@@ -196,41 +221,44 @@ def _items(page: Page) -> list[Item]:
     return items
 
 
-def parse(lines: list[Line], source: str | None = None) -> OrderDraft:
+def parse(lines: list[Line], source: str | None = None, boxes: dict | None = None) -> OrderDraft:
+    """``boxes``, if given, is filled with field key -> [[x0, y0, x1, y1], ...] in image pixels."""
     page = Page(lines)
-    contact = page.value("CONTACT NAME").split()
+    if boxes is not None:
+        page.boxes = boxes
+    contact = page.value("CONTACT NAME", "debtor.contact").split()
     if len(contact) < 2:
         raise ExtractionError(f"contact name {contact!r} has no first/last split")
-    status_text = _norm(page.value("PAID STATUS"))
+    status_text = _norm(page.value("PAID STATUS", "payment.status"))
     status = {"PAID": PaidStatus.PAID, "UNPAID": PaidStatus.UNPAID, "OPEN": PaidStatus.UNPAID}.get(
         status_text, PaidStatus.OTHER
     )
     paid_date = None
     try:
-        paid_date = _date(page.value("PAYMENT DATE"), "payment date")
+        paid_date = _date(page.value("PAYMENT DATE", "payment.paid_date"), "payment date")
     except ExtractionError:
         if status is PaidStatus.PAID:
             raise
 
     def total(name: str) -> Decimal:
-        return _dec(page.value(name), name.lower())
+        return _dec(page.value(name, name.lower().replace(" ", "_")), name.lower())
 
     return OrderDraft(
-        external_ref=page.value("EXTERNAL REFERENCE"),
-        order_date=_date(page.value("ORDER DATE"), "order date"),
-        currency=page.value("CURRENCY").upper(),
+        external_ref=page.value("EXTERNAL REFERENCE", "external_ref"),
+        order_date=_date(page.value("ORDER DATE", "order_date"), "order date"),
+        currency=page.value("CURRENCY", "currency").upper(),
         debtor=Debtor(
-            customer_id=page.value("CUSTOMER ID"),
-            company=page.value("COMPANY"),
+            customer_id=page.value("CUSTOMER ID", "debtor.customer_id"),
+            company=page.value("COMPANY", "debtor.company"),
             first_name=contact[0],
             last_name=" ".join(contact[1:]),
-            alias=page.value("CUSTOMER ALIAS"),
-            email=page.value("EMAIL"),
-            phone=page.value("PHONE"),
-            billing=_address(page, "BILLING ADDRESS"),
-            delivery=_address(page, "DELIVERY ADDRESS"),
+            alias=page.value("CUSTOMER ALIAS", "debtor.alias"),
+            email="".join(page.value("EMAIL", "debtor.email").split()),  # OCR inserts spaces; e-mails have none
+            phone=page.value("PHONE", "debtor.phone"),
+            billing=_address(page, "BILLING ADDRESS", "debtor.billing"),
+            delivery=_address(page, "DELIVERY ADDRESS", "debtor.delivery"),
         ),
-        payment=Payment(method=page.value("PAYMENT METHOD"), status=status, paid_date=paid_date),
+        payment=Payment(method=page.value("PAYMENT METHOD", "payment.method"), status=status, paid_date=paid_date),
         items=_items(page),
         net_total=total("NET TOTAL"),
         vat_total=total("VAT TOTAL"),

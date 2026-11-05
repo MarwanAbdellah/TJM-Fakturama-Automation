@@ -13,9 +13,9 @@ Every rectangle used for a click comes from the live UIA tree in this run.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 MAIN_TITLE = "Fakturama - .*"
 
@@ -47,7 +47,6 @@ class UI:
     """Handle on the running Fakturama main window (UIA + win32 views)."""
 
     evidence_dir: Path | None = None
-    log: list[dict] = field(default_factory=list)
 
     def __post_init__(self):
         from pywinauto.application import Application
@@ -73,19 +72,11 @@ class UI:
 
         def probe():
             hits = [
-                c
-                for c in root.descendants(control_type=control_type)
-                if c.element_info.name == name and _visible(c)
+                c for c in root.descendants(control_type=control_type) if c.element_info.name == name and _visible(c)
             ]
             return hits[index] if len(hits) > index else None
 
         return wait_for(probe, timeout, what=f"{control_type} {name!r}")
-
-    def exists(self, name: str, control_type: str, root=None) -> bool:
-        root = root or self.main
-        return any(
-            c.element_info.name == name and _visible(c) for c in root.descendants(control_type=control_type)
-        )
 
     def dialog(self, title: str, timeout: float = 10):
         """A modal dialog (child top-level window of Fakturama) by title."""
@@ -235,9 +226,7 @@ class UI:
 
         self.learn_locale(read(ctrl))  # the field's own display tells its decimal separator
         text = self.amount_text(Decimal(value))
-        return self.set_text(
-            ctrl, text, leave=leave, check=lambda v: parse_amount(v) == Decimal(value)
-        )
+        return self.set_text(ctrl, text, leave=leave, check=lambda v: parse_amount(v) == Decimal(value))
 
     decimal_sep: str = "."
 
@@ -359,6 +348,13 @@ class UI:
         ]
         if not tabs:
             raise AutomationError("no editor tab folder")
+        # The editor area always holds the 'Fakturama' start page; with the editor area
+        # maximized, views (Documents) float over it at the same top edge.
+        for t in tabs:
+            if any(
+                c.element_info.name == "Fakturama" for c in t.children() if c.element_info.control_type == "TabItem"
+            ):
+                return t
         return min(tabs, key=lambda c: c.rectangle().top)
 
     def active_editor(self) -> str:
@@ -451,5 +447,5 @@ def _escape(text: str) -> str:
     """Escape pywinauto send_keys metacharacters."""
     out = []
     for ch in text:
-        out.append("{%s}" % ch if ch in "+^%~(){}[]" else ch)
+        out.append(f"{{{ch}}}" if ch in "+^%~(){}[]" else ch)
     return "".join(out)

@@ -1,0 +1,21 @@
+{
+ "brand": "Meridian Rx Supply  |  Sales Order",
+ "order": {"ref": "RX-1003", "date": "2026-10-20", "customer_id": "HS-11290", "currency": "USD"},
+ "customer": {
+  "company": "Lakeshore General Hospital", "alias": "LAKESHORE-CHI", "contact": "Marcus Oyelaran",
+  "email": "pharmacy@lakeshore-general.example.com", "phone": "+1 312 555 0163",
+  "billing": ["Lakeshore General Hospital", "1650 West Harrison Street", "Chicago, IL 60612", "United States"],
+  "delivery": ["Lakeshore Inpatient Pharmacy", "1700 West Van Buren Street", "Chicago, IL 60612", "United States"]
+ },
+ "payment": {"method": "Bank Transfer", "status": "UNPAID", "date": null},
+ "items": [
+  {"sku": "NDC-0409-4888", "desc": "Sodium Chloride 0.9% 1000 mL", "qty": 48, "unit_net": 3.85, "disc": 0, "vat": 0},
+  {"sku": "NDC-0641-6078", "desc": "Heparin 5000 U/mL Vial 10ct", "qty": 6, "unit_net": 54.20, "disc": 0, "vat": 0},
+  {"sku": "NDC-0071-0155", "desc": "Atorvastatin 20 mg Tablets 90ct", "qty": 10, "unit_net": 24.60, "disc": 5, "vat": 0},
+  {"sku": "NDC-0378-0208", "desc": "Metformin 500 mg Tablets 500ct", "qty": 8, "unit_net": 32.75, "disc": 5, "vat": 0},
+  {"sku": "OTC-GLV-N100", "desc": "Nitrile Exam Gloves Box 100", "qty": 40, "unit_net": 9.90, "disc": 12, "vat": 6.25},
+  {"sku": "OTC-SYR-10ML", "desc": "Syringe 10 mL Luer Lock 100ct", "qty": 15, "unit_net": 21.30, "disc": 0, "vat": 6.25},
+  {"sku": "OTC-ALC-PAD", "desc": "Alcohol Prep Pads Box 200", "qty": 30, "unit_net": 4.15, "disc": 0, "vat": 6.25},
+  {"sku": "OTC-GAU-4X4", "desc": "Sterile Gauze Pads 4x4 Box 100", "qty": 25, "unit_net": 7.80, "disc": 3, "vat": 6.25}
+ ]
+}

@@ -420,7 +420,8 @@ picks = b.multiselect("...or bundled samples", SAMPLES)
 ai = st.toggle(
     "AI fallback for unknown layouts",
     help="If the local parser cannot read a file, or its result fails the checks, send the image to "
-    "Anthropic's Claude to read it. Off by default: the image leaves this machine. Needs ANTHROPIC_API_KEY.",
+    "an AI model (Gemini by default; VLM_BASE_URL / VLM_MODEL in .env) to read it. Off by default: the "
+    "image leaves this machine unless VLM_BASE_URL is a local server. Needs VLM_API_KEY in .env.",
 )
 for name, data in [(f.name, f.getvalue()) for f in uploads or []] + [
     (n, (SAMPLES_DIR / n).read_bytes()) for n in picks
@@ -493,13 +494,16 @@ else:
 st.divider()
 st.subheader("Checks")
 fk_ok, fk_msg = fakturama_ready()
+fk_closed = not fk_ok and "is not open" in fk_msg  # Book starts it; any other problem needs a human
 if problems:
     for pr in problems:
         st.error(pr)
 elif draft is not None:
     st.success("All arithmetic and format checks pass.")
-    rows = preview(draft) if fk_ok else [("Fakturama", fk_msg)]
-    if not fk_ok:
+    rows = preview(draft) if fk_ok else [("Fakturama", "closed: Book starts it" if fk_closed else fk_msg)]
+    if fk_closed:
+        st.info("Fakturama is closed. Booking starts it on the test workspace first.")
+    elif not fk_ok:
         st.error(fk_msg)
     st.table(pd.DataFrame(rows, columns=["What", "Fakturama will"]))
 
@@ -507,7 +511,23 @@ busy = running() or bool(ss.queue) or ss.current is not None
 bookable = [k for k, it in ss.orders.items() if not it["problems"] and it["status"] in ("new", "busy")]
 
 
+def ensure_fakturama() -> bool:
+    """Start Fakturama if it is closed and wait until it serves its database."""
+    from image2cash.ui.core import AutomationError, start_fakturama
+
+    try:
+        with st.spinner("Starting Fakturama on the test workspace…"):
+            start_fakturama()
+        ss.start_error = None
+        return True
+    except AutomationError as exc:
+        ss.start_error = f"Could not start Fakturama: {exc}"
+        return False
+
+
 def enqueue(keys: list[str]) -> None:
+    if not ensure_fakturama():
+        return
     for k in keys:
         ss.orders[k]["snapshot"] = ss.orders[k]["edited"]  # freeze what was reviewed
         ss.orders[k]["status"] = "queued"
@@ -521,19 +541,25 @@ c1, c2, c3 = st.columns([2, 2, 3])
 if c1.button(
     "Book this order",
     type="primary",
-    disabled=busy or not fk_ok or bool(problems) or draft is None or item["status"] not in ("new", "busy"),
+    disabled=busy
+    or not (fk_ok or fk_closed)
+    or bool(problems)
+    or draft is None
+    or item["status"] not in ("new", "busy"),
 ):
     enqueue([sel])
     st.rerun()
-if c2.button(f"Book all ready ({len(bookable)})", disabled=busy or not fk_ok or not bookable):
+if c2.button(f"Book all ready ({len(bookable)})", disabled=busy or not (fk_ok or fk_closed) or not bookable):
     enqueue(bookable)
     st.rerun()
 if ss.paused:
     c3.warning(ss.paused)
-    if c3.button("Resume queue", disabled=running() or not fk_ok):
+    if c3.button("Resume queue", disabled=running() or not (fk_ok or fk_closed)) and ensure_fakturama():
         ss.paused = None
         launch(ss.queue.pop(0))
         st.rerun()
 elif ss.queue or ss.current:
     c3.info(f"Booking {ss.orders[ss.current]['name'] if ss.current else '…'}; {len(ss.queue)} waiting.")
+if ss.get("start_error"):
+    st.error(ss.start_error)
 progress()

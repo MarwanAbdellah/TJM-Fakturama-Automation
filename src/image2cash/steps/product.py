@@ -1,8 +1,15 @@
-"""Brief §3: select or create each Product (and its VAT), then complete the line."""
+"""Brief §3: select or create each Product (and its VAT), then complete the lines.
+
+All products are added first; then the item table is read once and the Qty column
+and the Discount column are filled. Fakturama rebuilds the table after every cell
+edit (selection back to line 1, scroll back to the top), so nothing here relies on
+the highlight or the scroll position surviving an edit.
+"""
 
 from __future__ import annotations
 
 import logging
+import re
 import time
 from decimal import Decimal
 
@@ -12,7 +19,7 @@ from image2cash.steps.context import Ctx
 from image2cash.steps.order import read_totals
 from image2cash.ui import grid as G
 from image2cash.ui.core import AutomationError, ManualReview, read, wait_for
-from image2cash.validate import close, gross_price, line_net, money, parse_amount, vat_name
+from image2cash.validate import CENT, close, gross_price, line_net, money, parse_amount, vat_name
 from image2cash.verify import db
 
 SELECT_HEADERS = ["Item No.", "Name", "Description", "Stock", "Price", "VAT"]
@@ -23,12 +30,13 @@ log = logging.getLogger("image2cash.product")
 
 def all_items(ctx: Ctx) -> None:
     for item in ctx.order.items:  # 3.1 / 3.17, in source order
-        found = select_or_create(ctx, item)
-        complete_line(ctx, item, found)
+        select_or_create(ctx, item)
+    fill_lines(ctx)  # 3.13-3.16
+    verify_lines(ctx)
 
 
-def select_or_create(ctx: Ctx, item: Item) -> tuple[G.Grid, G.Row]:
-    """Put the item on a new Order line; returns the grid read and row that proved it."""
+def select_or_create(ctx: Ctx, item: Item) -> None:
+    """Put the item on a new Order line (Qty 1, no discount)."""
     rows = db.products_with_sku(item.sku)
     if len(rows) > 1:
         raise ManualReview(f"{len(rows)} products with SKU {item.sku}")
@@ -52,12 +60,11 @@ def select_or_create(ctx: Ctx, item: Item) -> tuple[G.Grid, G.Row]:
         ctx.record(f"3.3 product {item.sku}", "missing", rows_seen=len(grid.rows), shot=shot)
         create(ctx, item)
         return reselect(ctx, item, pos)
-    found = _check_new_row(ctx, item, pos)
+    _added(ctx, item, pos, rows[0]["price"])
     ctx.record(f"3.3 product {item.sku}", "ok", how=how, product=rows[0]["id"], shot=shot)
-    return found
 
 
-def reselect(ctx: Ctx, item: Item, pos: int) -> tuple[G.Grid, G.Row]:
+def reselect(ctx: Ctx, item: Item, pos: int) -> None:
     """3.12: pick the newly saved product from the still-open Order."""
     rows = db.products_with_sku(item.sku)
     if len(rows) != 1:
@@ -66,15 +73,38 @@ def reselect(ctx: Ctx, item: Item, pos: int) -> tuple[G.Grid, G.Row]:
     grid = S.search(ctx, dialog, item.sku, SELECT_HEADERS)
     if grid is not None:
         S.pick(ctx, dialog, grid, lambda r: sku_eq(r.get("Item No."), item.sku), "Item No.")
-    found = _check_new_row(ctx, item, pos)
+    _added(ctx, item, pos, rows[0]["price"])
     ctx.record(f"3.12 product {item.sku} reselected", "ok", product=rows[0]["id"])
-    return found
+
+
+def _added(ctx: Ctx, item: Item, pos: int, price) -> None:
+    """Prove the add without OCR: the Order's Total Net rises by exactly the catalogue
+    price (a new line has Qty 1 and no discount). Which row it landed on is checked
+    once for all lines in `fill_lines`."""
+    want = ctx.running_net + money(Decimal(str(price)))
+
+    def added():
+        net = read_totals(ctx).get("net")
+        return net if net is not None and abs(money(net) - want) <= CENT else None
+
+    try:
+        ctx.running_net = money(wait_for(added, 4, what=f"Total Net {want} after adding {item.sku}"))
+    except AutomationError as exc:
+        raise ManualReview(
+            f"adding {item.sku} as line {pos}: Order Total Net is {read_totals(ctx).get('net')}, expected {want}"
+        ) from exc
+
+
+def _items_label(ctx: Ctx):
+    lab = ctx.cache.get("items_label")
+    if lab is None or not lab.is_visible():
+        lab = ctx.cache["items_label"] = ctx.ui.find("Items", "Text", root=ctx.ui.editor_pane())
+    return lab
 
 
 def _items_grid(ctx: Ctx):
     """The Order's item table: the pane to the right of the 'Items' label column."""
-    ui = ctx.ui
-    lab = ui.find("Items", "Text", root=ui.editor_pane())
+    lab = _items_label(ctx)
     holder = lab.parent()
     hr = holder.rectangle()
     panes = [
@@ -92,61 +122,30 @@ def _items_grid(ctx: Ctx):
 sku_eq = S.ocr_eq
 
 
-def _scroll_to_bottom(ctx: Ctx, pane) -> None:
+def _scroll(ctx: Ctx, pane, dist: int) -> None:
     """The item table gets its own scrollbar after ~7 rows (calibrated). Its scrollbar
     buttons ignore UIA Invoke; the mouse wheel over the grid scrolls the table itself.
     Guard: if the 'Items' label moved, the outer editor scrolled instead."""
     from pywinauto import mouse
 
     r = pane.rectangle()
-    label = lambda: ctx.ui.find("Items", "Text", root=ctx.ui.editor_pane()).rectangle().top  # noqa: E731
+    label = lambda: _items_label(ctx).rectangle().top  # noqa: E731
     before = label()
     ctx.ui.focus()
-    mouse.scroll(coords=((r.left + r.right) // 2, (r.top + r.bottom) // 2), wheel_dist=-10)
-    time.sleep(0.4)
+    mouse.scroll(coords=((r.left + r.right) // 2, (r.top + r.bottom) // 2), wheel_dist=dist)
+    time.sleep(0.2)
     if label() != before:
         raise AutomationError("mouse wheel scrolled the Order editor, not the item table")
 
 
-def last_line(ctx: Ctx) -> tuple[G.Grid, G.Row]:
-    """The bottom-most fully visible item row (the newest line)."""
-    ctx.back_to_order()
-    pane = _items_grid(ctx)
-    _scroll_to_bottom(ctx, pane)
+def _table_rect(ctx: Ctx, pane):
     r = pane.rectangle()
     r.bottom = min(r.bottom, ctx.ui._editor_folder().rectangle().bottom)  # the table may extend below the editor
-
-    def probe():  # right after an Enter the table can repaint mid-capture: retry
-        g = G.read_grid(r, ITEM_HEADERS, owner=ctx.ui.main)
-        rows = [x for x in g.rows if x.get("Item No.") and x.y < r.bottom - 8]  # drop a half-clipped bottom row
-        return (g, rows[-1]) if rows else None
-
-    return wait_for(probe, 6, what="item rows")
+    return r
 
 
 def _row_pos(row: G.Row) -> int | None:
     return int(row.get("Pos.")) if row.get("Pos.").isdigit() else None
-
-
-def is_line(pos: int, seen: int | None, above: int | None, has_above: bool) -> bool:
-    """Is the bottom row line ``pos``? Pos. on the blue selected row is sometimes
-    unreadable; then the row above must be pos-1 (or there is none for line 1)."""
-    if seen is not None:
-        return seen == pos
-    return (pos == 1 and not has_above) or (has_above and above == pos - 1)
-
-
-def _check_new_row(ctx: Ctx, item: Item, pos: int) -> tuple[G.Grid, G.Row]:
-    def probe():
-        g, row = last_line(ctx)
-        above = [x for x in g.rows if x.get("Item No.") and x.y < row.y]
-        ok = is_line(pos, _row_pos(row), _row_pos(above[-1]) if above else None, bool(above))
-        return (g, row) if ok else None
-
-    g, row = wait_for(probe, 8, what=f"Order line {pos} for {item.sku}")
-    if not sku_eq(row.get("Item No."), item.sku):
-        raise ManualReview(f"Order line {pos} shows {row.get('Item No.')!r}, expected {item.sku}")
-    return g, row
 
 
 def _check_master(ctx: Ctx, item: Item, row: dict) -> None:
@@ -189,7 +188,13 @@ def ensure_vat(ctx: Ctx, pct: Decimal) -> str:
     code = ui.labelled("VAT code (E-Invoice)", "ComboBox", root=ed)
     if ui.combo_value(code).strip() != "S (Standard rate)":
         ui.combo_select(code, "S (Standard rate)")
-    ui.set_amount(ui.labelled("Value", "Edit", root=ed), pct)
+    value = ui.labelled("Value", "Edit", root=ed)
+    # The percent field shows '0%' (no separator to learn) and need not share the price fields'
+    # separator: '6,25' read back as 625%. Try '.', then ','; the read-back decides.
+    try:
+        ui.set_amount(value, pct, sep=".")
+    except AutomationError:
+        ui.set_amount(value, pct, sep=",")
     shot = ctx.shot(f"vat_new_{name}", [(code, "S (Standard rate)")])
     ui.save()
     wait_for(lambda: len(db.vats_named(name)) == 1, 10, what="VAT saved")
@@ -242,58 +247,179 @@ def create(ctx: Ctx, item: Item) -> None:
 
 
 # ---------------------------------------------------------------------------
-def complete_line(ctx: Ctx, item: Item, found: tuple[G.Grid, G.Row] | None = None) -> None:
-    """3.13-3.16: Qty and Discount on the item's row; U.Price is the catalogue's (confirmed
-    in _check_master, never typed). Verified by the running Total Net.
+TOP = 60  # wheel notches up: more than any order needs to get back to line 1
+PAGE = 2  # wheel notches per page while walking the table; 1 if 2 ever skips lines
+Rows = dict[int, G.Row]
 
-    Speed: a cell that already shows the wanted value is not edited (new lines start at
-    Qty 1 and Discount 0), the first edit reuses the read that proved the line, and the
-    row is re-read (with its SKU) only before a second edit.
-    """
+
+def walk(read_page, scroll_down, n_lines: int, max_pages: int = 200) -> list[tuple[int, Rows]]:
+    """Read the item table page by page from the top: [(notches below the top, rows by
+    line number)]. ``read_page()`` OCRs the current view; ``scroll_down(k)`` turns the
+    wheel k notches down. Pages overlap; if a page skips lines the walk backs up and
+    uses 1 notch from then on. Stops when every line is seen or the table stops moving."""
+    views = [(0, read_page())]
+    seen = set(views[0][1])
+    clicks, step = 0, PAGE
+    for _ in range(max_pages):
+        if all(n in seen for n in range(1, n_lines + 1)):
+            break
+        scroll_down(step)
+        rows = read_page()
+        if step > 1 and rows and seen and min(rows) > max(seen) + 1:  # lines skipped
+            scroll_down(1 - step)  # back up to one notch past the last page
+            step = 1
+            rows = read_page()
+        if not rows or set(rows) <= seen:
+            break  # end of the table: the wheel no longer moves it
+        clicks += step
+        views.append((clicks, rows))
+        seen |= set(rows)
+    return views
+
+
+def _walk(ctx: Ctx, pane) -> tuple[list[tuple[int, Rows]], G.Grid]:
+    """`walk` on the live table; also returns the first page's grid (for column positions)."""
+    first = []
+
+    def read_page() -> Rows:
+        r = _table_rect(ctx, pane)
+        g = G.read_grid(r, ITEM_HEADERS, owner=ctx.ui.main)
+        first.append(g)
+        return _numbered(g, r.bottom, top=r.top + 28)  # drop half-clipped rows at both edges
+
+    _scroll(ctx, pane, TOP)
+    return walk(read_page, lambda k: _scroll(ctx, pane, -k), len(ctx.order.items)), first[0]
+
+
+def _view(ctx: Ctx, pane, clicks: int) -> None:
+    """Show the page `clicks` notches below the top (every edit throws the view to the top)."""
+    _scroll(ctx, pane, TOP)
+    if clicks:
+        _scroll(ctx, pane, -clicks)
+
+
+def locate(views: list[tuple[int, Rows]], items: list[Item]) -> dict[int, tuple[int, float]]:
+    """Line number -> (page, screen y), from the numbered pages of `walk`; a line seen on
+    two pages keeps the first. Every line must be found and show its own SKU, or the run stops."""
+    at: dict[int, tuple[int, float]] = {}
+    for view, rows in views:
+        for n, row in rows.items():
+            if n in at or not 1 <= n <= len(items):
+                continue
+            if not sku_eq(row.get("Item No."), items[n - 1].sku):
+                raise ManualReview(f"Order line {n} shows {row.get('Item No.')!r}, expected {items[n - 1].sku}")
+            at[n] = (view, row.y)
+    missing = [n for n in range(1, len(items) + 1) if n not in at]
+    if missing:
+        raise ManualReview(f"Order lines {missing} not found in the item table")
+    return at
+
+
+def column_net(items: list[Item], with_discount: bool) -> Decimal:
+    """The Order's Total Net once the Qty column (and, if asked, the Discount column) is filled."""
+    return money(
+        sum((line_net(i.qty, i.unit_net, i.discount_pct if with_discount else Decimal(0)) for i in items), Decimal(0))
+    )
+
+
+def fill_lines(ctx: Ctx) -> None:
+    """3.13-3.16: read the finished table once, page by page (`walk`), then type every
+    Qty, then every Discount, straight into the known cells. U.Price is the catalogue's
+    (confirmed in _check_master, never typed).
+
+    Rows keep their y when values change (their height follows the product name), but
+    every edit throws the view back to the top, so each edit first replays its page's
+    scroll from the top. Total Net is checked after each column; `verify_lines`
+    re-reads every line before the Order is saved."""
     from pywinauto import mouse
     from pywinauto.keyboard import send_keys
 
-    ui = ctx.ui
-    done = ctx.order.items[: ctx.order.items.index(item) + 1]
-    want_net = money(sum((line_net(i.qty, i.unit_net, i.discount_pct) for i in done), Decimal(0)))
-    edits = [("Qty.", item.qty, Decimal(1)), ("Discount", item.discount_pct, Decimal(0))]
-    edits = [(col, value) for col, value, default in edits if value != default]
-
+    ui, items = ctx.ui, ctx.order.items
     ctx.back_to_order()
-    for n, (col, value) in enumerate(edits):
-        g, row = found if (n == 0 and found) else last_line(ctx)
-        if not sku_eq(row.get("Item No."), item.sku):
-            raise ManualReview(f"bottom Order line shows {row.get('Item No.')!r}, expected {item.sku}")
-        x = g.column_x(col)
-        if x is None:
-            raise AutomationError(f"item column {col!r} not located (have {g.headers})")
-        ui.focus()
-        mouse.double_click(coords=(int(x), int(row.y)))
-        time.sleep(0.3)
-        send_keys("^a")
-        send_keys(ui.amount_text(value, sep="."), pause=0.02)  # grid cells take '.' whatever the locale
-        send_keys("{ENTER}")
-        time.sleep(0.5)
+    pane = _items_grid(ctx)
+    views, g = _walk(ctx, pane)
+    cols = {c: (g.columns or {}).get(c) for c in ("Qty.", "Discount")}
+    if None in cols.values():
+        raise AutomationError(f"item columns not located (have {g.headers})")
+    at = locate(views, items)
 
-    def net_ok():
-        t = read_totals(ctx)
-        return t if close(t.get("net"), want_net, len(done)) else None
+    for col, field, default in (("Qty.", "qty", Decimal(1)), ("Discount", "discount_pct", Decimal(0))):
+        for n, it in enumerate(items, 1):
+            value = getattr(it, field)
+            if value == default:  # new lines already show Qty 1 and Discount 0
+                continue
+            clicks, y = at[n]
+            _view(ctx, pane, clicks)
+            left, right = cols[col]
+            ui.focus()
+            mouse.double_click(coords=(int((left + right) / 2), int(y)))
+            time.sleep(0.15)
+            send_keys("^a")
+            send_keys(ui.amount_text(value, sep="."), pause=0.02)  # grid cells take '.' whatever the locale
+            send_keys("{ENTER}")
+            time.sleep(0.2)
+        with_disc = col == "Discount"
+        want = column_net(items, with_disc)
 
-    try:
-        got = wait_for(net_ok, 5, what=f"Total Net {want_net} after line {item.sku}")
-    except AutomationError as exc:
-        raise ManualReview(
-            f"line {item.sku}: Order Total Net is {read_totals(ctx).get('net')}, expected {want_net}"
-        ) from exc
-    if money(got["net"]) != want_net:
-        ctx.warnings.append(f"after line {item.sku}: Total Net {got['net']} vs image {want_net} (catalogue rounding)")
-    ctx.record(
-        f"3.16 line {item.sku}",
-        "ok",
-        qty=item.qty,
-        unit_net=item.unit_net,
-        discount=item.discount_pct,
-        line_net=line_net(item.qty, item.unit_net, item.discount_pct),
-        running_net=got["net"],
-        shot=ctx.shot(f"line_{item.sku}"),
-    )
+        def net_ok(want=want):
+            t = read_totals(ctx)
+            return t if close(t.get("net"), want, items) else None
+
+        try:
+            got = wait_for(net_ok, 5, what=f"Total Net {want} after the {col} column")
+        except AutomationError as exc:
+            raise ManualReview(
+                f"after filling {col}: Order Total Net is {read_totals(ctx).get('net')}, expected {want}"
+            ) from exc
+        if with_disc and money(got["net"]) != want:
+            ctx.warnings.append(f"Total Net {got['net']} vs image {want} (catalogue rounding)")
+        ctx.record(f"3.16 {col} column", "ok", lines=len(items), net=got["net"], shot=ctx.shot(f"column_{col}"))
+
+
+# --- one full read before saving -----------------------------------------------
+def _num(text: str) -> Decimal | None:
+    m = re.search(r"\d+(?:\.\d+)?", text.replace(",", ""))
+    return None if m is None else money(Decimal(m.group()))
+
+
+def _numbered(g: G.Grid, bottom: float, top: float = float("-inf")) -> Rows:
+    """Rows of one read keyed by line number, without rows cut off at either edge.
+    Pos. is unreadable on the blue selected row, so rows are numbered from the most
+    common (Pos. - index) offset."""
+    rows = [r for r in g.rows if r.get("Item No.") and top < r.y < bottom - 8]
+    offsets = [_row_pos(r) - i for i, r in enumerate(rows) if _row_pos(r) is not None]
+    if not offsets:
+        return {}
+    off = max(set(offsets), key=offsets.count)
+    return {i + off: r for i, r in enumerate(rows)}
+
+
+def verify_lines(ctx: Ctx) -> None:
+    """Read the whole item table page by page and compare every line's SKU, Qty and
+    Discount with the order. Runs once, before the Order is saved."""
+    items = ctx.order.items
+    ctx.back_to_order()
+    seen: Rows = {}
+    for _, rows in _walk(ctx, _items_grid(ctx))[0]:
+        seen = {**rows, **seen}  # first page a line appears on wins
+    problems, unread = [], []
+    for n, it in enumerate(items, 1):
+        row = seen.get(n)
+        if row is None:
+            problems.append(f"line {n} not found in the item table")
+            continue
+        if not sku_eq(row.get("Item No."), it.sku):
+            problems.append(f"line {n} shows {row.get('Item No.')!r}, expected {it.sku}")
+        for col, want in (("Qty.", money(it.qty)), ("Discount", money(it.discount_pct))):
+            got = _num(row.get(col))
+            if got is None:
+                unread.append(f"line {n} {col}")
+            elif got != want:
+                problems.append(f"line {n} {col} shows {row.get(col)!r}, expected {want}")
+    if unread:  # OCR could not read the cell; the Total Net check and the DB check after save still cover it
+        ctx.warnings.append("final table read could not read: " + ", ".join(unread))
+    shot = ctx.shot("item_table")
+    if problems:
+        ctx.record("3.17 all lines", "REVIEW", problems=problems, shot=shot)
+        raise ManualReview("item table differs from the order: " + "; ".join(problems))
+    ctx.record("3.17 all lines", "ok", lines=len(items), shot=shot)

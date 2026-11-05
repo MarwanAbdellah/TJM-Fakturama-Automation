@@ -2,6 +2,7 @@
 
 from datetime import date
 
+import pytest
 from PIL import Image, ImageDraw
 
 from image2cash.extract.ocr import Line
@@ -83,3 +84,51 @@ def test_listener_pid_reads_netstat():
     assert listener_pid(out, 9001) == 176348
     assert listener_pid(out, 59001) == 1234
     assert listener_pid(out, 9002) is None
+
+
+@pytest.mark.parametrize(
+    "shown, want",
+    [
+        ("20 Oct 2026", "7 Nov 2026"),
+        ("06 Oct 2026", "07 Nov 2026"),  # keep the field's zero padding
+        ("Oct 20, 2026", "Nov 7, 2026"),
+        ("20.10.2026", "07.11.2026"),
+        ("2026-10-20", "2026-11-07"),
+        ("garbage", None),  # unknown format: fall back to stepping
+    ],
+)
+def test_date_is_pasted_in_the_fields_own_format(shown, want):
+    from datetime import date
+
+    from image2cash.ui.datefield import format_like, parse_display
+
+    got = format_like(shown, date(2026, 11, 7))
+    assert got == want
+    assert got is None or parse_display(got) == date(2026, 11, 7)
+
+
+def test_closed_dialog_is_seen_as_gone():
+    import win32gui
+
+    from image2cash.steps.selector import _gone
+
+    class Dialog:
+        def __init__(self, handle):
+            self.handle = handle
+
+    assert _gone(Dialog(0))  # no window
+    assert _gone(Dialog(0x7FFFFFF0))  # a handle that is not (or no longer) a window
+    assert not _gone(Dialog(win32gui.GetDesktopWindow()))  # an open, visible window
+
+
+def test_vat_percent_is_typed_with_a_dot_whatever_the_price_fields_use():
+    from decimal import Decimal
+
+    from image2cash.ui.core import UI
+    from image2cash.validate import parse_amount
+
+    ui = UI.__new__(UI)  # no Fakturama needed for formatting
+    ui.decimal_sep = ","  # learned from a price field
+    assert ui.amount_text(Decimal("6.25"), sep=".") == "6.25"
+    assert parse_amount("625%") != Decimal("6.25")  # the 2026-11-05 read-back: caught, so ',' is retried
+    assert parse_amount("6.25%") == Decimal("6.25")

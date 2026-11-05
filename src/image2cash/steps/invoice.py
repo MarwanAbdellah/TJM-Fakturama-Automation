@@ -33,7 +33,7 @@ def create_and_pay(ctx: Ctx) -> None:
     }
     if copied["cust_ref"] != o.external_ref:
         raise ManualReview(f"invoice Cust.Ref. {copied['cust_ref']!r} != {o.external_ref!r}")
-    if not close(copied["totals"]["total"], o.gross_total, len(o.items)):
+    if not close(copied["totals"]["total"], o.gross_total, o.items):
         raise ManualReview(f"invoice total {copied['totals']['total']} != {o.gross_total}")
     ctx.record("5.1 invoice opened", "ok", number=ctx.invoice_no, shot=shot, **copied)
 
@@ -122,10 +122,13 @@ def verify(ctx: Ctx) -> None:
     i, so = inv[0], orders[0]
     pay = db.payment(i["payment_id"]) if i["payment_id"] else None
     paid = o.payment.status is PaidStatus.PAID
+    from image2cash.steps.debtor import is_debtor_of
+
     checks = {
         "invoice number": i["number"] == ctx.invoice_no,
+        "invoice debtor": is_debtor_of(ctx, i["id"]),
         "linked to order": i["src_id"] == so["id"],
-        "invoice total": close(i["total"], o.gross_total, len(o.items)),
+        "invoice total": close(i["total"], o.gross_total, o.items),
         "payment method": pay is not None and pay["name"] == o.payment.method,
         "paid flag": bool(i["paid"]) == paid,
         "pay date": (i["pay_date"] == o.payment.paid_date.isoformat()) if paid else True,

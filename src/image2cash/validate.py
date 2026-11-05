@@ -18,10 +18,18 @@ def money(value: Decimal) -> Decimal:
     return value.quantize(CENT, rounding=ROUND_HALF_UP)
 
 
-def close(a: Decimal | None, b: Decimal, lines: int) -> bool:
-    """Equal within 1 cent per order line. Catalogue prices entered as rounded gross
-    (brief 3.9) store a net with a small remainder, so booked totals can drift by cents."""
-    return a is not None and abs(money(Decimal(a)) - money(Decimal(b))) <= CENT * max(1, lines)
+def drift(items) -> Decimal:
+    """How far a booked total may differ from the image. A catalogue price matches the
+    image only to the cent, so it may be off by up to half a cent per unit, and that
+    is multiplied by the quantity (qty 40 x 0.4 cent = 16 cents). Per line: 1 cent of
+    rounding plus 0.6 cent per unit (half a cent, with up to 20 % VAT on top)."""
+    return sum((CENT + Decimal("0.006") * abs(i.qty) for i in items), Decimal(0))
+
+
+def close(a: Decimal | None, b: Decimal, items) -> bool:
+    """Equal within `drift(items)`. Catalogue prices entered as rounded gross (brief 3.9)
+    store a net with a small remainder, so booked totals can drift by a few cents."""
+    return a is not None and abs(money(Decimal(a)) - money(Decimal(b))) <= max(CENT, drift(items))
 
 
 def line_net(qty: Decimal, unit_net: Decimal, discount_pct: Decimal) -> Decimal:

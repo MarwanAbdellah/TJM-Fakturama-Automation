@@ -58,7 +58,7 @@ def capture(rect, owner=None):
     if owner is not None:
         try:
             owner.set_focus()
-            time.sleep(0.25)
+            time.sleep(0.1)
         except Exception:
             pass
 
@@ -246,7 +246,7 @@ def read_stable(rect, header_names, timeout: float = 8, owner=None) -> Grid:
         if last is not None and g.text() == last.text():
             return g
         last = g
-        time.sleep(0.6)
+        time.sleep(0.2)
     if last is None:
         raise AutomationError("grid could not be read")
     return last

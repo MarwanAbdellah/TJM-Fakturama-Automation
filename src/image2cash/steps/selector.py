@@ -19,43 +19,40 @@ from collections.abc import Callable
 
 from image2cash.steps.context import Ctx
 from image2cash.ui import grid as G
-from image2cash.ui.core import AutomationError, ManualReview
+from image2cash.ui.core import AutomationError, ManualReview, wait_for
+from image2cash.ui.core import paste as _paste
 
 log = logging.getLogger("image2cash.selector")
-
-
-def _paste(text: str) -> None:
-    import win32clipboard as cb
-    from pywinauto.keyboard import send_keys
-
-    cb.OpenClipboard()
-    try:
-        cb.EmptyClipboard()
-        cb.SetClipboardText(text, cb.CF_UNICODETEXT)
-    finally:
-        cb.CloseClipboard()
-    send_keys("^a^v")
 
 
 def open_selector(ctx: Ctx, icon_label: str, title: str):
     ui = ctx.ui
     ctx.back_to_order()
-    icon = ui.icon_beside(icon_label, 0, root=ui.editor_pane())  # the upper icon, never the green +
-    ui.click(icon)
+    key = ("icon", icon_label)
+    try:  # the icon does not move while the Order is open; finding it costs ~0.5 s
+        icon = ctx.cache[key]
+        ui.click(icon)
+    except Exception:  # noqa: BLE001 - not cached yet, or the cached element went stale
+        icon = ctx.cache[key] = ui.icon_beside(icon_label, 0, root=ui.editor_pane())  # upper icon, never the +
+        ui.click(icon)
     return ui.dialog(title), icon
 
 
 def search(ctx: Ctx, dialog, term: str, headers: list[str]) -> G.Grid | None:
     """Paste ``term``; return the stabilized grid, or None if the dialog auto-accepted."""
-    ui = ctx.ui
     edit = G.search_edit(dialog)
     dialog.set_focus()
     edit.click_input()
     _paste(term)
-    log.debug("search %r in %r", term, dialog.window_text())
-    time.sleep(1.0)
-    if dialog.window_text() not in ui.dialogs():
+    title = dialog.window_text()
+    log.debug("search %r in %r", term, title)
+    try:  # a unique match auto-accepts and closes the dialog; poll instead of a fixed 1 s wait
+        # by handle: a dialog found on the Desktop (title '') is not one of Fakturama's child
+        # windows, so a by-title check saw it as closed and an unpicked search passed as accepted
+        wait_for(lambda: _gone(dialog), 1.0, interval=0.1, what="selector auto-accept")
         return None
+    except AutomationError:
+        pass
     pane = G.grid_below_search(dialog)
     grid = G.read_stable(pane.rectangle(), headers, owner=dialog)
     # shortcut: no paging in selectors; an exact SKU/company search rarely fills the list. Page if it ever does.
@@ -76,7 +73,7 @@ def pick(ctx: Ctx, dialog, grid: G.Grid, is_target: Callable[[G.Row], bool], col
 
     dialog.set_focus()
     mouse.click(coords=(int(x), int(y)))
-    time.sleep(0.4)
+    time.sleep(0.15)
     press(dialog, "OK")
 
 
@@ -84,9 +81,24 @@ def press(dialog, name: str) -> None:
     for b in dialog.descendants(control_type="Button"):
         if b.element_info.name == name:
             b.invoke()
-            time.sleep(0.8)
+            try:  # most buttons close the dialog: return as soon as it is gone (was a fixed 0.8 s)
+                wait_for(lambda: _gone(dialog), 0.8, interval=0.1, what=f"{name!r} to close")
+            except AutomationError:
+                pass
             return
     raise AutomationError(f"{name!r} not in {dialog.window_text()!r}")
+
+
+def _gone(dialog) -> bool:
+    """The dialog's window is closed or hidden. Asked of Win32 by handle: the UIA wrapper of a
+    closed SWT shell keeps answering 'visible', which made every press wait its full timeout."""
+    import win32gui
+
+    try:
+        h = dialog.handle
+    except Exception:  # noqa: BLE001
+        return True
+    return not (h and win32gui.IsWindow(h) and win32gui.IsWindowVisible(h))
 
 
 def ocr_eq(seen: str | None, want: str) -> bool:

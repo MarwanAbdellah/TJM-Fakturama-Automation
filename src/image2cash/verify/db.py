@@ -243,11 +243,12 @@ def document_items(document_id: int) -> list[dict]:
 
 def document_receivers(document_id: int) -> list[dict]:
     rows = query(
-        'SELECT "BILLINGTYPE", "COMPANY", "FIRSTNAME", "NAME", "STREET", "ZIP", "CITY", "COUNTRYCODE" '
+        'SELECT "BILLINGTYPE", "COMPANY", "FIRSTNAME", "NAME", "STREET", "ZIP", "CITY", "COUNTRYCODE", '
+        '"ORIGINCONTACTID" '
         f'FROM "FKT_DOCUMENTRECEIVER" WHERE "FK_DOCUMENT" = ? AND {live()} ORDER BY "ID"',
         (document_id,),
     )
-    keys = ("type", "company", "first_name", "name", "street", "zip", "city", "country")
+    keys = ("type", "company", "first_name", "name", "street", "zip", "city", "country", "contact_id")
     return [dict(zip(keys, r)) for r in rows]
 
 

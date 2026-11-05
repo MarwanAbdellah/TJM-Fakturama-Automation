@@ -1,5 +1,9 @@
 """Set Fakturama's segmented date fields (Nebula CDateTime) through the keyboard.
 
+First choice: if the field already shows the date, leave it; otherwise paste the
+date in the field's own format and read it back. Only if that does not take does
+the stepping below run.
+
 Typing a whole date does not work: each segment (day, month, year) is edited
 on its own, and where the caret lands depends on the click. Plain arrow-key
 navigation was not deterministic in calibration either.
@@ -68,8 +72,29 @@ def _which_changed(a: date, b: date) -> str | None:
     return None
 
 
+def _day(shown_day: str, target: date) -> str:
+    return f"{target.day:02d}" if shown_day.startswith("0") else str(target.day)  # only a leading 0 shows padding
+
+
+def format_like(shown: str, target: date) -> str | None:
+    """``target`` written the way the field shows dates (e.g. '20 Oct 2026'), for pasting."""
+    t = " ".join(shown.strip().split())
+    mon = target.strftime("%b")
+    if m := re.match(r"^(\d{1,2}) [A-Za-z]+\.? \d{4}$", t):
+        return f"{_day(m[1], target)} {mon} {target.year}"
+    if m := re.match(r"^[A-Za-z]+\.? (\d{1,2}), \d{4}$", t):
+        return f"{mon} {_day(m[1], target)}, {target.year}"
+    if m := re.match(r"^\d{1,2}([./])\d{1,2}[./]\d{4}$", t):
+        return f"{target.day:02d}{m[1]}{target.month:02d}{m[1]}{target.year}"
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", t):
+        return target.isoformat()
+    return None
+
+
 def set_date(ui, ctrl, target: date, max_keys: int = 400) -> date:
     from pywinauto.keyboard import send_keys
+
+    from image2cash.ui.core import paste
 
     def now() -> date:
         value = parse_display(read(ctrl))
@@ -82,9 +107,20 @@ def set_date(ui, ctrl, target: date, max_keys: int = 400) -> date:
         time.sleep(0.12)
         return now()
 
+    if now() == target:  # often already right: nothing to do
+        return target
     ui.focus()
     ctrl.click_input()
     time.sleep(0.2)
+    text = format_like(read(ctrl), target)
+    if text:  # one paste instead of stepping each segment; read back decides
+        paste(text)
+        send_keys("{TAB}")
+        time.sleep(0.3)
+        if now() == target:
+            return target
+        ctrl.click_input()  # the paste did not take: step the segments (below)
+        time.sleep(0.2)
     budget = max_keys
     # Year first, then month, then day, so an intermediate value is never an
     # invalid date such as 31 Feb.

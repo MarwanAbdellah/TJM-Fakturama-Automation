@@ -17,6 +17,7 @@ import re
 import subprocess
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -34,7 +35,21 @@ class ManualReview(RuntimeError):
     """Data or UI is ambiguous; a human has to decide."""
 
 
-def wait_for(predicate: Callable[[], object], timeout: float = 10, interval: float = 0.25, what: str = ""):
+def paste(text: str) -> None:
+    """Select all in the focused field and paste ``text`` (one keystroke pair, not typing)."""
+    import win32clipboard as cb
+    from pywinauto.keyboard import send_keys
+
+    cb.OpenClipboard()
+    try:
+        cb.EmptyClipboard()
+        cb.SetClipboardText(text, cb.CF_UNICODETEXT)
+    finally:
+        cb.CloseClipboard()
+    send_keys("^a^v")
+
+
+def wait_for(predicate: Callable[[], object], timeout: float = 10, interval: float = 0.1, what: str = ""):
     deadline = time.monotonic() + timeout
     last_exc: Exception | None = None
     while time.monotonic() < deadline:
@@ -58,6 +73,38 @@ def listener_pid(netstat: str, port: int) -> int | None:
     return None
 
 
+def _db_port_owner() -> tuple[int, int | None]:
+    port = int(re.search(r":(\d+)/", config.HSQL_URL)[1])
+    out = subprocess.run(["netstat", "-ano", "-p", "TCP"], capture_output=True, text=True, timeout=10).stdout
+    return port, listener_pid(out, port)
+
+
+def start_fakturama(timeout: float = 180) -> int:
+    """The configured Fakturama, started on the test workspace if it is closed. Returns its pid
+    once its window is up and it serves the database. Never starts a second instance while
+    another program (e.g. the live Fakturama) holds the database port."""
+    try:
+        return target_instance()
+    except AutomationError:
+        pass
+    port, owner = _db_port_owner()
+    if owner is not None:
+        raise AutomationError(
+            f"port {port} is held by another program (pid {owner}), probably another Fakturama. "
+            f"Close it, then start again."
+        )
+    log.info("starting Fakturama on %s", config.WORKSPACE)
+    subprocess.Popen(
+        [str(config.FAKTURAMA_EXE), "-data", str(config.WORKSPACE)],
+        cwd=str(config.FAKTURAMA_HOME),
+        creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+        close_fds=True,
+    )
+    pid = wait_for(target_instance, timeout, interval=1, what="Fakturama to start")
+    time.sleep(5)  # the window and the DB come up before the workbench finishes loading its views
+    return pid
+
+
 def target_instance() -> int:
     """PID of the Fakturama window for config.WORKDIR, and only if that same process serves
     the database we read. Two Fakturama instances (test + live) cannot both own port 9001,
@@ -74,15 +121,18 @@ def target_instance() -> int:
             f"Fakturama for {config.WORKDIR} is not open. Start it with: "
             f'"{config.FAKTURAMA_EXE}" -data "{config.WORKSPACE}"'
         )
-    port = int(re.search(r":(\d+)/", config.HSQL_URL)[1])
-    out = subprocess.run(["netstat", "-ano", "-p", "TCP"], capture_output=True, text=True, timeout=10).stdout
-    owner = listener_pid(out, port)
+    port, owner = _db_port_owner()
     if owner not in pids:
         raise AutomationError(
             f"The database on port {port} belongs to another program (pid {owner}), not to Fakturama for "
             f"{config.WORKDIR}. Close the other Fakturama, then restart the one for {config.WORKDIR}."
         )
     return owner
+
+
+# One worker writes screenshots in order; the interpreter waits for it at exit, so none are lost.
+UIA_MAXIMIZED = 1  # UIA WindowVisualState: 0 normal, 1 maximized, 2 minimized (not Win32's SW_*)
+_SAVER = ThreadPoolExecutor(max_workers=1, thread_name_prefix="shots")
 
 
 @dataclass
@@ -95,22 +145,26 @@ class UI:
         from pywinauto.application import Application
 
         pid = target_instance()
-        # A minimized window counts as invisible to UIA, so restore it first (win32 still sees it).
+        # Maximize first. A minimized window is invisible to UIA (win32 still sees it), and in a
+        # small window the Order's fields lie off-screen, so clicks and typing miss them.
         w32 = Application(backend="win32").connect(process=pid).window(title_re=MAIN_TITLE)
-        if w32.is_minimized():
-            w32.restore()
+        if not w32.is_maximized():
+            w32.maximize()
             time.sleep(1)
         self.uia_app = Application(backend="uia").connect(process=pid)
         self.main = self.uia_app.window(title_re=MAIN_TITLE).wrapper_object()
         self.w32_app = Application(backend="win32").connect(process=self.main.process_id())
         self.w32 = self.w32_app.window(handle=self.main.handle)
         self._shot = 0
+        self._folder = None  # the editor tab folder, cached (finding it walks the whole window)
 
     # ---- basic tree access -------------------------------------------------
     def focus(self) -> None:
         try:
-            if self.main.get_show_state() == 2:  # minimized
-                self.main.restore()
+            if self.main.get_show_state() != UIA_MAXIMIZED:  # resized or minimized mid-run
+                log.debug("maximize Fakturama (was resized or minimized)")
+                self.main.maximize()
+                time.sleep(0.5)
             self.main.set_focus()
         except Exception:
             pass
@@ -143,13 +197,6 @@ class UI:
             return None
 
         return wait_for(probe, timeout, what=f"dialog {title!r}")
-
-    def dialogs(self) -> list[str]:
-        out = []
-        for c in self.main.children():
-            if c.element_info.control_type == "Window":
-                out.append(c.window_text())
-        return out
 
     # ---- label anchoring ---------------------------------------------------
     def labelled(self, label: str, control_type: str = "Edit", root=None, nth_label: int = 0, timeout: float = 10):
@@ -273,14 +320,14 @@ class UI:
                 raise AutomationError(f"field read back {value!r}, expected {text!r}")
         return value
 
-    def set_amount(self, ctrl, value, leave: str = "tab") -> str:
-        """Type a money/number value in the field's own locale and verify it."""
+    def set_amount(self, ctrl, value, leave: str = "tab", sep: str | None = None) -> str:
+        """Type a money/number value in the field's own locale (or ``sep``) and verify it."""
         from decimal import Decimal
 
         from image2cash.validate import parse_amount
 
         self.learn_locale(read(ctrl))  # the field's own display tells its decimal separator
-        text = self.amount_text(Decimal(value))
+        text = self.amount_text(Decimal(value), sep=sep)
         return self.set_text(ctrl, text, leave=leave, check=lambda v: parse_amount(v) == Decimal(value))
 
     decimal_sep: str = "."
@@ -325,54 +372,6 @@ class UI:
         # SWT listens for CBN_SELCHANGE which select() sends; confirm.
         wait_for(lambda: (combo.selected_text() or "").strip() == text.strip(), 3, what=f"combo -> {text}")
 
-    def close_editor(self, title_match, save: bool = False) -> None:
-        """Close an editor tab; answer the save prompt explicitly."""
-        from pywinauto.keyboard import send_keys
-
-        self.activate_editor(title_match)
-        send_keys("^w")
-        time.sleep(0.8)
-        try:
-            parts = self.dialog("Save Parts", timeout=1.5)
-        except AutomationError:
-            parts = None
-        if parts is not None:
-            # Eclipse "Save Parts": a checklist of dirty editors, then OK.
-            from pywinauto.controls.common_controls import ListViewWrapper
-
-            lv = [c for c in parts.descendants(control_type="List")][0]
-            w32 = ListViewWrapper(lv.handle)
-            buttons = {b.element_info.name: b for b in parts.descendants(control_type="Button")}
-            # LVM_SETITEMSTATE and Space are ignored by this SWT table; a click
-            # on the checkbox glyph (left edge of the item) works. Verify each.
-            from pywinauto import mouse
-
-            items = sorted(lv.descendants(control_type="ListItem"), key=lambda c: c.rectangle().top)
-            for i in range(w32.item_count()):
-                if w32.is_checked(i) != save:
-                    parts.set_focus()
-                    r = items[i].rectangle()
-                    mouse.click(coords=(r.left + 8, (r.top + r.bottom) // 2))
-                    time.sleep(0.3)
-                if w32.is_checked(i) != save:
-                    buttons["Cancel"].invoke()
-                    raise AutomationError("could not set the Save Parts checkbox; close cancelled")
-            buttons["OK"].invoke()
-            time.sleep(0.6)
-            return
-        for name in ("Save Resource", "Save", "Question"):
-            try:
-                dlg = self.dialog(name, timeout=1)
-            except AutomationError:
-                continue
-            labels = ("&Yes", "Yes", "Save") if save else ("&No", "No", "Don't Save", "Do&n't Save")
-            for b in dlg.descendants(control_type="Button"):
-                if b.element_info.name in labels:
-                    b.invoke()
-                    time.sleep(0.5)
-                    return
-            raise AutomationError(f"save prompt {name!r} has no expected button")
-
     def combo_value(self, uia_combo) -> str:
         from pywinauto.controls.win32_controls import ComboBoxWrapper
 
@@ -398,6 +397,12 @@ class UI:
         return [c.element_info.name for c in items]
 
     def _editor_folder(self):
+        if self._folder is not None and _visible(self._folder):
+            return self._folder
+        self._folder = self._find_editor_folder()
+        return self._folder
+
+    def _find_editor_folder(self):
         tabs = [
             c
             for c in self.main.descendants(control_type="Tab")
@@ -420,6 +425,9 @@ class UI:
     def activate_editor(self, title: str | Callable[[str], bool]) -> str:
         match = title if callable(title) else (lambda t: t.lstrip("*") == title)
         folder = self._editor_folder()
+        if match(folder.element_info.name):  # already the active tab: clicking it again costs ~1.5 s
+            self.focus()  # the click also gave Fakturama the keyboard (Ctrl+W, typing)
+            return folder.element_info.name
         log.debug("activate editor (open: %s)", self.editor_tabs())
         for c in folder.children():
             if c.element_info.control_type == "TabItem" and match(c.element_info.name):
@@ -476,7 +484,7 @@ class UI:
             draw.text((box[0] + 3, box[1] - 15), label, fill=(255, 255, 255))
         self.evidence_dir.mkdir(parents=True, exist_ok=True)
         path = self.evidence_dir / f"{self._shot:02d}_{name}.png"
-        img.save(path)
+        _SAVER.submit(img.save, path)  # PNG encoding is the slow part; the run need not wait for it
         return path
 
 

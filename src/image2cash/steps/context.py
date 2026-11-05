@@ -6,6 +6,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,7 @@ class Ctx:
     ui: UI
     order: OrderDraft
     run_dir: Path
+    contact_id: int | None = None  # the Debtor picked in the Order's selector (FKT_CONTACT id)
     order_no: str = ""  # the "No." Fakturama proposed (PO...)
     invoice_no: str = ""
     resume: bool = False
@@ -28,6 +30,9 @@ class Ctx:
     created: list[str] = field(default_factory=list)  # master data created by this run
     warnings: list[str] = field(default_factory=list)
     steps: list[dict] = field(default_factory=list)
+    running_net: Decimal = Decimal(0)  # the Order's Total Net after the last added line
+    cache: dict = field(default_factory=dict)  # Order-editor controls that do not move while it is open
+    _order_pane: int | None = None  # handle of the editor pane last verified as our Order
 
     def record(self, step: str, status: str, **details: Any) -> None:
         entry = {"t": round(time.time(), 2), "step": step, "status": status, **details}
@@ -68,15 +73,22 @@ class Ctx:
         return t == "New Order" or (bool(self.order_no) and t == self.order_no)
 
     def back_to_order(self) -> None:
+        # Fast path: our Order tab is still the active one (same pane we verified), so
+        # there is nothing to click or read back. Each full return costs about 1.5 s.
+        if self._order_pane is not None and self.is_order_tab(self.ui._editor_folder().element_info.name):
+            if self.ui.editor_pane().handle == self._order_pane:
+                return
         if not any(self.is_order_tab(t) for t in self.ui.editor_tabs()):
             self.open_saved_order()
         self.ui.activate_editor(self.is_order_tab)
         # postcondition: this really is our order (Cust.Ref. reads back)
         from image2cash.ui.core import AutomationError, read
 
-        ref = read(self.ui.labelled("Cust.Ref.", "Edit", root=self.ui.editor_pane()))
+        pane = self.ui.editor_pane()
+        ref = read(self.ui.labelled("Cust.Ref.", "Edit", root=pane))
         if ref != self.order.external_ref:
             raise AutomationError(f"returned to an editor with Cust.Ref. {ref!r}")
+        self._order_pane = pane.handle
 
     def open_saved_order(self) -> None:
         """Resume path: open the saved Order from Data > Documents > Orders."""

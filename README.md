@@ -37,9 +37,14 @@ It runs from a CLI too.
 
 ## Results (live, test workspace, USD)
 
-The samples are a fictional pharmaceutical distributor's orders (US and Canada,
-billed in USD). They were rendered from the JSON specs in `samples/`. Tax
-rates: 0 % for prescription items and 6.25 % for over-the-counter supplies.
+The samples are a fictional pharmaceutical distributor's orders (US and Canada
+customers). They were rendered from the JSON specs in `samples/`. Tax rates:
+0 % for prescription items and 6.25 % for over-the-counter supplies.
+
+The runs below were booked in USD as RX-1001 to RX-1003. The workspace now
+books in **EUR** (currency locale Ireland), and the samples were re-rendered in
+EUR as `order_RX-2001` to `order_RX-2003`: same customers, products and
+amounts, new references, so they don't collide with the USD bookings.
 
 | Image | What it exercises | Outcome |
 |---|---|---|
@@ -66,13 +71,16 @@ or Resume with its command, and each exit code.
 **Requirements:** Windows 10/11, Fakturama 2.2.0, Python 3.12, [uv](https://docs.astral.sh/uv/), and Node.js (only to regenerate the diagrams).
 
 1. Use a **copy** of the Fakturama workspace; runs create real records. To book
-   in USD, set `PREFERENCE_CURRENCY_LOCALE=en/US` in
+   in EUR, set `PREFERENCE_CURRENCY_LOCALE=ga/IE` (Ireland: euro, `1,234.57`) in
    `<workspace>/.metadata/.plugins/org.eclipse.core.runtime/.settings/com.sebulli.fakturama.rcp.prefs`.
    Do this **while Fakturama is closed**, because it rewrites the file on exit.
    Then start Fakturama on that workspace:
    ```bash
    "D:/Fakturama/Fakturama2/Fakturama.exe" -data "C:/Users/<you>/.fakturama2_test"
    ```
+   In the Streamlit app you can skip this: **Book this order** starts Fakturama on
+   the configured workspace if it is closed (about 70 s), then runs the order. It
+   refuses to start a second Fakturama while another program holds the database port.
 2. Install the dependencies. The first OCR call downloads Indra's models.
    ```bash
    uv sync
@@ -97,20 +105,26 @@ After you press a Book button, don't touch the mouse or keyboard until the page 
 
 **CLI:** OCR and validate an image or PDF only.
 ```bash
-uv run image2cash extract samples/order_RX-1001.png
+uv run image2cash extract samples/order_RX-2001.png
 ```
 **Opt-in AI fallback** for layouts the parser can't read. It sends the image
-to Anthropic, so it is off unless you ask for it (`--ai` here, a toggle in the
-app). It needs the extra and a key:
+to an AI model, so it is off unless you ask for it (`--ai` here, a toggle in the
+app). Any OpenAI-compatible chat API works; the default is Gemini
+(`gemini-3.6-flash`) and needs a key from Google AI Studio. Copy
+`.env.example` to `.env` and put the key in `VLM_API_KEY`:
 ```bash
-uv sync --extra llm
+cp .env.example .env
 ```
+Another provider or model: change `VLM_BASE_URL` and `VLM_MODEL` in `.env`.
+`.env` is git-ignored; a variable set in the shell overrides it.
+A local server (Ollama, LM Studio on `http://localhost...`) needs no key and
+keeps the image on this machine.
 ```bash
 uv run image2cash extract samples/unseen/hospital_po.png --ai
 ```
 **CLI:** run the full flow.
 ```bash
-uv run image2cash run samples/order_RX-1001.png
+uv run image2cash run samples/order_RX-2001.png
 ```
 **CLI:** run a reviewed or edited draft.
 ```bash
@@ -122,10 +136,10 @@ uv run image2cash run <image> --resume
 ```
 **CLI:** read-only DB view of the documents for a reference.
 ```bash
-uv run image2cash verify RX-1001
+uv run image2cash verify RX-2001
 ```
 
-**Tests and hooks:** 69 unit tests, plus ruff and hygiene hooks; pytest also runs on push.
+**Tests and hooks:** 71 unit tests, plus ruff and hygiene hooks; pytest also runs on push.
 ```bash
 uv run pytest -q
 ```
@@ -139,7 +153,7 @@ uv run python tools/make_unseen.py
 ```
 Render a synthetic order from a JSON spec.
 ```bash
-uv run python tools/make_sample.py samples/order_RX-1003.json
+uv run python tools/make_sample.py samples/order_RX-2003.json
 ```
 Regenerate the hand-drawn diagrams:
 ```bash
@@ -195,8 +209,9 @@ cd tools/diagrams && npm install && node make_diagrams.mjs
 | The item table gets its own scrollbar after about 7 rows; the scrollbar buttons ignore UIA Invoke | Maximize the editor area; scroll with the mouse wheel over the grid, and stop if the editor itself moved; the newest line must be the bottom row with `Pos.` = line number |
 | Header captions on gray are faint, so OCR reads only some of them | Columns come from drawn grid lines and are named by a majority vote of the captions that were read |
 | Segmented date fields | Find each segment by pressing Up and seeing what changed, type the digits, read back |
-| Locale differences | Form fields parse in the UI locale; grid cells always take `.` |
+| Locale differences | Form fields parse in the UI locale; grid cells always take `.`; the VAT percent field takes `.` even where price fields take `,` (typing `6,25` gave 625 %), so it tries `.` then `,` and reads back |
 | The e-mail validator rejects `.test` domains | Detected in the DB and reported as a warning (samples use `example.com`) |
+| A small (or resized) window puts the Order's fields off-screen, so typing goes nowhere | Maximize Fakturama at the start, and again whenever it was resized or minimized |
 | "Save Parts" ignores programmatic unchecking | Click the checkbox glyph and verify; cancel if that fails |
 
 ## What is skipped or simplified
@@ -205,15 +220,15 @@ cd tools/diagrams && npm install && node make_diagrams.mjs
   document family. The four orders in `samples/unseen/` (a hospital PO, a
   rotated noisy fax, a two-column distributor form, a PDF letter) are all
   rejected offline (exit 3, "label 'CONTACT NAME' not found"), and nothing is
-  touched. With `--ai` (or the app toggle) Claude reads them into the same
+  touched. With `--ai` (or the app toggle) the AI model reads them into the same
   `OrderDraft`; that draft has no field boxes, so the app asks you to check
   every field, and `check_order` plus the DB checks still apply. The fallback
   is unit-tested against a mock API only: no API key was available here.
 - **Prices are never typed.** An existing product's catalogue net price must
   match the image to the cent, or the run stops for review. Vendors change
-  prices in the product master, not on an order. Totals may differ by at most
-  1 cent per line (gross-entered prices leave a net remainder); drift is a
-  warning.
+  prices in the product master, not on an order. Because a price matches only
+  to the cent, totals may differ by 1 cent per line plus 0.6 cent per unit
+  (qty 40 can add 16 cents); any difference is reported as a warning.
 - **PDF input uses page 1 only**, rendered at 200 dpi.
 - **The queue lives in the browser tab.** Reloading the page loses it. It
   continues after "done" or "rejected" and pauses after "failed", "manual
@@ -230,11 +245,20 @@ cd tools/diagrams && npm install && node make_diagrams.mjs
 - **Resume only covers "Order saved, Invoice not yet".** An earlier stop needs
   the unsaved Order discarded and a rerun; master data created before the stop
   is reused.
-- **Speed:** the 8-line order took 264 s, mostly OCR re-reads of the item
-  grid. Now a line reuses the read that proved it and only edits Qty and
-  Discount when they differ from the default; a running-total check catches a
-  wrong row. Expected: about one grid read per line instead of five. Not yet
-  re-timed live.
+- **Speed:** the 8-line order took 264 s, then about 3 min, then 1 min 50 s
+  in a live run of the line-by-line version. That run also showed why line by
+  line is fragile: Fakturama rebuilds the item table after every cell edit
+  (selection back to line 1, scroll back to the top), and rows differ in
+  height. So now all products are added first (each proven by Total Net), the
+  table is read once page by page (so long orders work too: about one OCR
+  read per 6 lines), and then the Qty column and the Discount column are
+  filled, replaying each line's page from the top before its edit. The full-table check before saving stays. Dates are pasted in the
+  field's own format and read back; the segment stepping is only a fallback.
+  Fixed waits were replaced by polling. Measured on the live app, OCR of
+  the item table takes only ~0.2 s; the slow parts were UIA lookups (finding
+  the editor folder ~0.4 s, the four totals ~0.75 s), so controls that do not
+  move while the Order is open are now cached (totals: 0.75 s -> 0.03 s), and
+  screenshots are written in the background. Not yet timed end to end.
 - **No cleanup or rollback** of a failed run's records.
 - **The app is local only.** It has no authentication and serves one user, so
   don't expose it. The run moves the real mouse, so the desktop must stay
@@ -259,12 +283,12 @@ cd tools/diagrams && npm install && node make_diagrams.mjs
 app/streamlit_app.py     upload → boxes → review → preview → proceed → live log → result
 src/image2cash/
   extract/   ocr.py (Indra + boxes, PDF page 1), layout.py (label-anchored parser, field boxes),
-             vision.py (opt-in Claude fallback)
+             vision.py (opt-in AI fallback, Gemini by default)
   ui/        core.py (locators, editors, screenshots), grid.py (OCR grids), datefield.py
   steps/     order.py, debtor.py, product.py, invoice.py, selector.py, context.py
   verify/    db.py (read-only HSQLDB)
   models.py  validate.py  flow.py (state machine, run lock)  cli.py  config.py
-tests/       69 unit tests + recorded OCR fixture
+tests/       71 unit tests + recorded OCR fixture
 tools/       make_sample.py (order renderer), make_unseen.py (4 unseen layouts), diagrams/ (rough.js)
 samples/     pharma orders (JSON spec + PNG), the assessment image, unseen/ (4 layouts + truth)
 docs/        design.md, design_v2.md, design_v3.md, egm_review.md, PLAN_v2.md, diagrams/, screenshots/

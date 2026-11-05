@@ -24,6 +24,22 @@ def _exact(ctx: Ctx):
     return db.contacts_matching(d.company, d.first_name, d.last_name, d.billing.zip, d.billing.city)
 
 
+def chosen_id(ctx: Ctx) -> int | None:
+    """The Debtor this run picked; on --resume (no pick this run) the one exact match."""
+    if ctx.contact_id is None:
+        matches = _exact(ctx)
+        return matches[0].id if len(matches) == 1 else None
+    return ctx.contact_id
+
+
+def is_debtor_of(ctx: Ctx, document_id: int) -> bool:
+    """Every address on the saved document comes from the Debtor this run picked.
+    (FKT_DOCUMENT.FK_CONTACT stays empty; each receiver row keeps ORIGINCONTACTID.)"""
+    want = chosen_id(ctx)
+    rows = db.document_receivers(document_id)
+    return want is not None and bool(rows) and all(r["contact_id"] == want for r in rows)
+
+
 def _row_is_target(ctx: Ctx, contact=None):
     d = ctx.order.debtor
 
@@ -70,9 +86,11 @@ def select_or_create(ctx: Ctx) -> None:
         # auto-accepted a single filtered row
         if len(matches) != 1:
             raise ManualReview("selector auto-accepted a contact that is not an exact match; review the Order")
+        ctx.contact_id = matches[0].id
         ctx.record("2.3 debtor select", "ok", how="auto-accepted unique row", contact=matches[0].id, shot=shot)
     elif len(matches) == 1:
         S.pick(ctx, dialog, grid, _row_is_target(ctx, matches[0]), "Company")
+        ctx.contact_id = matches[0].id
         ctx.record("2.3 debtor select", "ok", how="picked exact row", contact=matches[0].id, shot=shot)
     else:
         visible = [r.cells for r in grid.rows if _row_is_target(ctx)(r)]
@@ -82,7 +100,7 @@ def select_or_create(ctx: Ctx) -> None:
         ctx.record("2.3 debtor select", "missing", rows_seen=len(grid.rows), shot=shot)
         create(ctx)
         reselect(ctx)
-    verify_order_addresses(ctx)
+    # 2.4 (the Order's address boxes) is checked just before Save: order.complete_and_save
 
 
 def reselect(ctx: Ctx) -> None:
@@ -95,28 +113,42 @@ def reselect(ctx: Ctx) -> None:
     grid = S.search(ctx, dialog, d.company, HEADERS)
     if grid is not None:
         S.pick(ctx, dialog, grid, _row_is_target(ctx, matches[0]), "Company")
+    ctx.contact_id = matches[0].id
     ctx.record("2.12 debtor reselect", "ok", contact=matches[0].id, shot=ctx.shot("debtor_reselected"))
 
 
 def verify_order_addresses(ctx: Ctx) -> None:
-    """2.4 / 2.13: the populated Invoice/Delivery address boxes match the image."""
+    """2.4 / 2.13: the populated Invoice/Delivery address boxes match the image.
+
+    Runs just before the Order is saved. Delivery is read first and Invoice last, so
+    the Invoice address tab is left active: Fakturama 2.2.0 crashes saving with the
+    Delivery tab active. No other step checks the addresses (the DB check after
+    saving covers number, date, total and lines)."""
     ui, d = ctx.ui, ctx.order.debtor
     ctx.back_to_order()
     ed = ui.editor_pane()
     seen = {}
-    for tab, addr in (("Invoice address", d.billing), ("Delivery address", d.delivery)):
-        items = [c for c in ed.descendants(control_type="TabItem") if c.element_info.name == tab and _visible(c)]
-        if not items:
+    tabs = {c.element_info.name: c for c in ed.descendants(control_type="TabItem") if _visible(c)}
+    for tab, addr in (("Delivery address", d.delivery), ("Invoice address", d.billing)):
+        item = tabs.get(tab)
+        if item is None:
             seen[tab] = None
             continue
-        ui.click(items[0])
-        time.sleep(0.5)
-        folder = items[0].parent()
-        edits = [c for c in folder.descendants(control_type="Edit") if _visible(c)]
-        text = read(edits[0]) if edits else ""
+        ui.click(item)
+        folder = item.parent()
+
+        def shown(folder=folder, addr=addr):
+            edits = [c for c in folder.descendants(control_type="Edit") if _visible(c)]
+            text = read(edits[0]) if edits else ""
+            flat = " ".join(text.split())
+            return text, [v for v in (addr.street, addr.zip, addr.city) if v not in flat]
+
+        try:  # poll until the tab's box shows the address (was a fixed 0.5 s wait)
+            wait_for(lambda: not shown()[1], 1.5, interval=0.1, what=f"{tab} box")
+        except AutomationError:
+            pass
+        text, missing = shown()
         seen[tab] = text
-        flat = " ".join(text.split())
-        missing = [v for v in (addr.street, addr.zip, addr.city) if v not in flat]
         if missing:
             raise ManualReview(f"{tab} on the Order lacks {missing}: {text!r}")
     if seen.get("Delivery address") is None and not d.same_delivery:

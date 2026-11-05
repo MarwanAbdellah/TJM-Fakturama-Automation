@@ -101,14 +101,20 @@ def open_order(ctx: Ctx) -> None:
 def read_totals(ctx: Ctx) -> dict[str, Decimal | None]:
     ui = ctx.ui
     ed = ui.editor_pane()
+    # The fields do not move while an editor is open; finding all four costs ~0.75 s, so
+    # they are found once per editor (keyed by its pane: the Invoice has its own totals).
+    found = ctx.cache.setdefault(("totals", ed.handle), {})
     out = {}
     # The totals are UIA Edits named after their labels. Find them by name:
     # 'VAT' is also the label of the VAT-mode combo, so label anchoring is ambiguous.
     for key, label in (("net", "Total Net"), ("vat", "VAT"), ("total", "Total"), ("discount", "Discount")):
         try:
-            ctrl = ui.find(label, "Edit", root=ed, timeout=2)
+            ctrl = found.get(key)
+            if ctrl is None:
+                ctrl = found[key] = ui.find(label, "Edit", root=ed, timeout=2)
             out[key] = parse_amount(read(ctrl))
         except Exception:
+            found.pop(key, None)  # stale or missing: find it again next time
             out[key] = None
     return out
 
@@ -133,7 +139,7 @@ def complete_and_save(ctx: Ctx) -> None:
     problems = [
         f"{k}: UI {got[k]} vs source {want}"
         for k, want in (("net", o.net_total), ("vat", o.vat_total), ("total", o.gross_total))
-        if not close(got[k], want, len(o.items))
+        if not close(got[k], want, o.items)
     ]
     shot = ctx.shot("order_complete")
     if problems:
@@ -145,7 +151,9 @@ def complete_and_save(ctx: Ctx) -> None:
     # 'Delivery address' tab is the active address tab throws an NPE in
     # DocumentEditor.doSave ("Failed to persist contents of part"). Select the
     # Invoice address tab first.
-    _select_address_tab(ctx, "Invoice address")
+    from image2cash.steps.debtor import verify_order_addresses
+
+    verify_order_addresses(ctx)  # 2.4; leaves the Invoice address tab active, as the save bug needs
     ui.save()  # 4.4
     wait_for(lambda: ui.active_editor() == ctx.order_no, 10, what="order saved (tab title = number, no '*')")
     verify_saved_order(ctx)
@@ -161,6 +169,12 @@ def _select_address_tab(ctx: Ctx, name: str) -> None:
         time.sleep(0.4)
 
 
+def discount_ok(rebate, pct: Decimal) -> bool:
+    """ITEMREBATE is a negative fraction (5 % is stored as -0.05, seen in the test DB).
+    One scale only, so a 100x error cannot pass."""
+    return abs(abs(rebate or Decimal(0)) * 100 - pct) < Decimal("0.01")
+
+
 def verify_saved_order(ctx: Ctx) -> None:
     """4.5: the saved Order as persisted (also the entry check when resuming)."""
     ui, o = ctx.ui, ctx.order
@@ -169,19 +183,20 @@ def verify_saved_order(ctx: Ctx) -> None:
         raise AutomationError(f"expected one saved Order, DB has {len(docs)}")
     d = docs[0]
     items = db.document_items(d["id"])
+    from image2cash.steps.debtor import is_debtor_of
+
     checks = {
         "number": d["number"] == ctx.order_no,
+        "debtor": is_debtor_of(ctx, d["id"]),
         "date": d["date"] == o.order_date.isoformat(),
-        "total": close(d["total"], o.gross_total, len(o.items)),
+        "total": close(d["total"], o.gross_total, o.items),
         "items": len(items) == len(o.items),
     }
     for src, it in zip(o.items, items):
         checks[f"item {src.pos} sku"] = it["sku"] == src.sku
         checks[f"item {src.pos} qty"] = money(it["qty"]) == money(src.qty)
         checks[f"item {src.pos} price"] = abs(it["price"] - src.unit_net) < Decimal("0.005")
-        checks[f"item {src.pos} discount"] = abs(abs(it["rebate"]) * 100 - src.discount_pct) < Decimal("0.01") or abs(
-            abs(it["rebate"]) - src.discount_pct
-        ) < Decimal("0.01")
+        checks[f"item {src.pos} discount"] = discount_ok(it["rebate"], src.discount_pct)
         checks[f"item {src.pos} vat"] = abs(it["vat_value"] * 100 - src.vat_pct) < Decimal("0.001")
     failed = [k for k, v in checks.items() if not v]
     ui.nav("Documents")

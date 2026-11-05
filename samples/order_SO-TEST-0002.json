@@ -1,0 +1,14 @@
+{
+ "order": {"ref": "SO-TEST-0002", "date": "2026-08-03", "customer_id": "CUST-2044", "currency": "EUR"},
+ "customer": {
+  "company": "Lindgren Moebelbau GmbH", "alias": "LINDGREN-HAMBURG", "contact": "Jonas Lindgren",
+  "email": "jonas.lindgren@lindgren-moebel.de", "phone": "+49 40 3344 5566",
+  "billing": ["Lindgren Moebelbau GmbH", "Hafenstrasse 12", "20459 Hamburg", "Germany"],
+  "delivery": ["Lindgren Moebelbau GmbH", "Hafenstrasse 12", "20459 Hamburg", "Germany"]
+ },
+ "payment": {"method": "SEPA Direct Debit", "status": "UNPAID", "date": null},
+ "items": [
+  {"sku": "LMP-DESK-07", "desc": "LED Desk Lamp", "qty": 4, "unit_net": 35.00, "disc": 5, "vat": 7},
+  {"sku": "CHR-ERG-01", "desc": "Ergonomic Desk Chair", "qty": 1, "unit_net": 250.00, "disc": 0, "vat": 19}
+ ]
+}

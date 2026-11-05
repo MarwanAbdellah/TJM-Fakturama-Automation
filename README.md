@@ -42,7 +42,7 @@ customers). They were rendered from the JSON specs in `samples/`. Tax rates:
 0 % for prescription items and 6.25 % for over-the-counter supplies.
 
 The runs below were booked in USD as RX-1001 to RX-1003. The workspace now
-books in **EUR** (currency locale Ireland), and the samples were re-rendered in
+books in **EUR** (currency locale Germany, `de/DE`: `1.234,57 €`), and the samples were re-rendered in
 EUR as `order_RX-2001` to `order_RX-2003`: same customers, products and
 amounts, new references, so they don't collide with the USD bookings.
 
@@ -51,7 +51,7 @@ amounts, new references, so they don't collide with the USD bookings.
 | `order_RX-1001.png`, Boston pharmacy | New debtor; new product; existing payment and VATs; PAID by Credit Card. **Started from the Streamlit app's Proceed button.** | Order PO000006 and Invoice INV000007, paid, verified. One uninterrupted run. |
 | `order_RX-1002.png`, Toronto distributor | Canadian postal code; different delivery warehouse; PAID by Bank Transfer | Order PO000007 and Invoice INV000008 ($633.76, paid), in one uninterrupted run of 109 s. |
 | `order_RX-1003.png`, Chicago hospital | **8 lines** (the item table scrolls); new VAT 6.25 %; 8 new products; separate delivery address; UNPAID | Order PO000005 and Invoice INV000006 ($2,035.58). This one was built up over several calibration runs (see "found live" below) and finished with `--resume`. |
-| `order_WEB-2026-0714-A17.png`, the assessment's own image (EUR) | Reference input | Booked earlier as PO000002 / INV000003 while the workspace still used its old currency. Under USD it now **stops for manual review**: "order is in EUR, Fakturama books in USD". This is the intended behaviour. |
+| `order_WEB-2026-0714-A17.png`, the assessment's own image (EUR) | Reference input | Booked earlier as PO000002 / INV000003 in a workspace that has since been reset. The currency guard stops any order whose currency differs from the workspace's ("order is in EUR, Fakturama books in USD" while it booked in USD). The workspace books in EUR now, so this order passes the guard; it has not been re-run since the switch. |
 
 Each run writes these files to `runs/<id>/`:
 
@@ -71,9 +71,11 @@ or Resume with its command, and each exit code.
 **Requirements:** Windows 10/11, Fakturama 2.2.0, Python 3.12, [uv](https://docs.astral.sh/uv/), and Node.js (only to regenerate the diagrams).
 
 1. Use a **copy** of the Fakturama workspace; runs create real records. To book
-   in EUR, set `PREFERENCE_CURRENCY_LOCALE=ga/IE` (Ireland: euro, `1,234.57`) in
-   `<workspace>/.metadata/.plugins/org.eclipse.core.runtime/.settings/com.sebulli.fakturama.rcp.prefs`.
-   Do this **while Fakturama is closed**, because it rewrites the file on exit.
+   in EUR, set the currency locale to Germany (`de/DE`: `1.234,57 €`) in
+   **File → Preferences**. Don't edit the `.prefs` file: Fakturama also keeps the
+   setting in its database (`FKT_USERPROPERTY`), and only Preferences updates
+   both. Check it by opening a New Order: its Total must show `€`. The run's
+   currency guard stops any order in another currency before typing anything.
    Then start Fakturama on that workspace:
    ```bash
    "D:/Fakturama/Fakturama2/Fakturama.exe" -data "C:/Users/<you>/.fakturama2_test"
@@ -139,7 +141,7 @@ uv run image2cash run <image> --resume
 uv run image2cash verify RX-2001
 ```
 
-**Tests and hooks:** 71 unit tests, plus ruff and hygiene hooks; pytest also runs on push.
+**Tests and hooks:** 116 unit tests, plus ruff and hygiene hooks; pytest also runs on push.
 ```bash
 uv run pytest -q
 ```
@@ -288,7 +290,7 @@ src/image2cash/
   steps/     order.py, debtor.py, product.py, invoice.py, selector.py, context.py
   verify/    db.py (read-only HSQLDB)
   models.py  validate.py  flow.py (state machine, run lock)  cli.py  config.py
-tests/       71 unit tests + recorded OCR fixture
+tests/       116 unit tests + recorded OCR fixture
 tools/       make_sample.py (order renderer), make_unseen.py (4 unseen layouts), diagrams/ (rough.js)
 samples/     pharma orders (JSON spec + PNG), the assessment image, unseen/ (4 layouts + truth)
 docs/        design.md, design_v2.md, design_v3.md, egm_review.md, PLAN_v2.md, diagrams/, screenshots/

@@ -21,4 +21,5 @@ and the JRE bundled with Fakturama).
   credit card, 59 SEPA direct debit.
 - **Settings.** Fakturama also keeps its settings in `FKT_USERPROPERTY`
   (`T_VALUE`), for example `PREFERENCE_CURRENCY_LOCALE`. Change them through
-  File → Preferences, not by editing the prefs file.
+  File → Preferences, not by editing the prefs file. The test workspace uses
+  `de/DE` (EUR, `1.234,57`); the prefs file and the database both say so.

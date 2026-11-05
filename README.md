@@ -20,6 +20,20 @@ It runs from a CLI too.
 - Diagrams: [`docs/diagrams/`](docs/diagrams), hand-drawn (architecture, flow, control grounding)
 - Evidence: [`docs/screenshots/`](docs/screenshots), annotated, one per step
 
+## Diagrams
+
+**Architecture.** The app and the CLI drive the same flow. Fakturama is only written through its UI; its database is only read.
+
+![Architecture](docs/diagrams/architecture.svg)
+
+**Order flow.** This is the Order-first flow from the brief. Database counts decide between select, create and manual review.
+
+![Order flow](docs/diagrams/flow.svg)
+
+**Control grounding.** How each control is found, in order of preference. No coordinates are stored.
+
+![Control grounding](docs/diagrams/grounding.svg)
+
 ## Results (live, test workspace, USD)
 
 The samples are a fictional pharmaceutical distributor's orders (US and Canada,

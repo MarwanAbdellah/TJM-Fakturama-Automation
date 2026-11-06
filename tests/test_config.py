@@ -1,5 +1,7 @@
 """Machine settings are found, not hard-coded: Java prefs parsing and the install search order."""
 
+from pathlib import Path
+
 from image2cash import config
 
 
@@ -58,3 +60,14 @@ def test_what_fakturama_saved_wins_over_env(tmp_path, monkeypatch):
     assert config.first_run() and str(config.workdir()).endswith("Fakturama_Test_Working")  # fallback
     config.PREFS_FILE.write_text(f"GENERAL_WORKSPACE=F{bs}:{bs}{bs}test\n", encoding="latin-1")
     assert not config.first_run() and str(config.workdir()) == f"F:{bs}test"  # what the window shows
+
+
+def test_launched_on_matches_only_the_test_workspace():
+    from image2cash.ui.core import launched_on
+
+    ws = Path(r"C:\Users\x\.fakturama2_test")
+    assert launched_on(r"D:\F\Fakturama.exe -data C:\Users\x\.fakturama2_test", ws)
+    assert launched_on(r'"D:\F\Fakturama.exe" -data "c:\users\x\.fakturama2_test\"', ws)
+    assert not launched_on(r"D:\F\Fakturama.exe -data C:\Users\x\.fakturama2", ws)  # the live workspace
+    assert not launched_on(r"D:\F\Fakturama.exe", ws)  # default workspace
+    assert not launched_on(None, ws)

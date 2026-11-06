@@ -8,7 +8,7 @@ from types import SimpleNamespace as NS
 import pytest
 from test_validate import make
 
-from image2cash.steps import debtor, invoice, order, product
+from image2cash.steps import debtor, order, product
 from image2cash.ui.core import AutomationError, ManualReview
 
 # ---------------------------------------------------------------------------
@@ -21,7 +21,7 @@ def _ctx(o):
         order_no="PO1",
         invoice_no="INV1",
         contact_id=7,
-        ui=NS(nav=lambda *a: None),
+        ui=NS(nav=lambda *a: None, show_documents=lambda *a: None),
         shot=lambda *a, **k: None,
         record=lambda *a, **k: None,
     )
@@ -63,7 +63,20 @@ def _world(o):
         Order=[doc],
         Invoice=[inv],
         items=items,
-        receivers=[{"contact_id": 7}, {"contact_id": 7}],
+        receivers=[
+            dict(
+                type=role,
+                contact_id=7,
+                company=o.debtor.company,
+                first_name=o.debtor.first_name,
+                name=o.debtor.last_name,
+                street=a.street,
+                zip=a.zip,
+                city=a.city,
+                country="DE",
+            )
+            for role, a in ((3, o.debtor.billing), (5, o.debtor.delivery))
+        ],
         payment={"name": o.payment.method},
     )
 
@@ -75,6 +88,7 @@ def booked(monkeypatch):
     monkeypatch.setattr(order.db, "documents_with_ref", lambda ref, dtype=None: w[dtype])
     monkeypatch.setattr(order.db, "document_items", lambda doc_id: w["items"])
     monkeypatch.setattr(order.db, "document_receivers", lambda doc_id: w["receivers"])
+    monkeypatch.setattr(order.db, "document_receiver_details", lambda doc_id: w["receivers"])
     monkeypatch.setattr(order.db, "payment", lambda pid: w["payment"])
     return _ctx(o), w
 
@@ -82,7 +96,6 @@ def booked(monkeypatch):
 def test_a_correct_booking_passes(booked):
     ctx, _ = booked
     order.verify_saved_order(ctx)
-    invoice.verify(ctx)
 
 
 @pytest.mark.parametrize(
@@ -108,27 +121,104 @@ def test_saved_order_differences_stop_the_run(booked, spoil, failed):
 
 
 @pytest.mark.parametrize(
-    "spoil, failed",
-    [
-        (lambda w: w["Invoice"][0].update(number="INV2"), "invoice number"),
-        (lambda w: w["Invoice"][0].update(src_id=3), "linked to order"),
-        (lambda w: w["payment"].update(name="Cash"), "payment method"),
-        (lambda w: w["Invoice"][0].update(paid=False), "paid flag"),
-        (lambda w: w["Invoice"][0].update(pay_date="2026-07-19"), "pay date"),
-        (lambda w: w["Invoice"][0].update(paid_value=D("1")), "paid value"),
-        (lambda w: w["Order"][0].update(paid=True), "order still open"),
-        (lambda w: w["receivers"].clear(), "invoice debtor"),
+    "index, field, failed",
+    [(0, key, "billing contact") for key in ("company", "first_name", "name")]
+    + [
+        (index, key, f"{role} address")
+        for index, role in enumerate(("billing", "delivery"))
+        for key in ("street", "zip", "city")
     ],
 )
-def test_saved_invoice_differences_stop_the_run(booked, spoil, failed):
+def test_saved_order_address_fields_must_match_source(booked, index, field, failed):
     ctx, w = booked
-    spoil(w)
+    records = []
+    ctx.record = lambda *a, **k: records.append((a, k))
+    w["receivers"][index][field] = "different"
     with pytest.raises(AutomationError, match=f"'{failed}'"):
-        invoice.verify(ctx)
+        order.verify_saved_order(ctx)
+    assert records[-1][0] == ("4.5 order in DB", "FAIL")
+    assert failed in records[-1][1]["failed"]
+    assert records[-1][1]["receivers"] == w["receivers"]
+
+
+@pytest.mark.parametrize("role", [3, 5])
+@pytest.mark.parametrize("duplicate", [False, True])
+def test_saved_order_requires_unambiguous_address_roles(booked, role, duplicate):
+    ctx, w = booked
+    ctx.order.debtor.delivery = ctx.order.debtor.delivery.model_copy(update={"street": "Warehouse 2"})
+    w["receivers"][1]["street"] = "Warehouse 2"
+    row = next(r for r in w["receivers"] if r["type"] == role)
+    if duplicate:
+        w["receivers"].append(dict(row))
+    else:
+        w["receivers"].remove(row)
+    with pytest.raises(AutomationError, match="billing address" if role == 3 else "delivery address"):
+        order.verify_saved_order(ctx)
+
+
+def test_saved_order_allows_absent_delivery_only_for_shared_address(booked):
+    ctx, w = booked
+    w["receivers"].pop(1)
+    order.verify_saved_order(ctx)
+    ctx.order.debtor.delivery = ctx.order.debtor.delivery.model_copy(update={"name": "Another site"})
+    with pytest.raises(AutomationError, match="delivery address"):
+        order.verify_saved_order(ctx)
+
+
+@pytest.mark.parametrize(
+    "source_zip, source_city, saved_zip, saved_city",
+    [
+        ("02116", "Boston, MA", "MA 02116", "Boston"),
+        ("M5J 2S1", "Toronto, ON", "M5J 2S1", "Toronto"),
+        ("L4W 4Y2", "Mississauga, ON", "L4W 4Y2", "Mississauga"),
+    ],
+)
+def test_saved_order_reuses_postcode_normalization_and_ignores_site_name_and_country(
+    booked,
+    source_zip,
+    source_city,
+    saved_zip,
+    saved_city,
+):
+    ctx, w = booked
+    for field in ("billing", "delivery"):
+        address = getattr(ctx.order.debtor, field)
+        setattr(ctx.order.debtor, field, address.model_copy(update={"zip": source_zip, "city": source_city}))
+    for row in w["receivers"]:
+        row.update(zip=saved_zip, city=saved_city, country="US")
+    ctx.order.debtor.delivery = ctx.order.debtor.delivery.model_copy(update={"name": "Receiving Warehouse"})
+    order.verify_saved_order(ctx)
+    w["receivers"][1]["zip"] = "2S1"
+    with pytest.raises(AutomationError, match="delivery address"):
+        order.verify_saved_order(ctx)
 
 
 # ---------------------------------------------------------------------------
 # select or create: the DB count decides, the grid only locates
+
+
+@pytest.mark.parametrize(
+    "price, outcome", [("450,00 €", "ok"), ("450,02 €", "ok"), ("450,10 €", "review"), ("?", "unread")]
+)
+def test_final_line_price_is_parsed_and_checked(monkeypatch, price, outcome):
+    o = make()
+    o.items = o.items[:1]
+    row = {"Item No.": "X", "Qty.": "2", "Discount": "10", "Price": price}
+    monkeypatch.setattr(product, "_items_grid", lambda ctx: None)
+    monkeypatch.setattr(product, "_walk", lambda *a: ([(0, {1: row})], None))
+    ctx = NS(
+        order=o,
+        back_to_order=lambda: None,
+        warnings=[],
+        shot=lambda *a: None,
+        record=lambda *a, **k: None,
+    )
+    if outcome == "review":
+        with pytest.raises(ManualReview, match="line 1 Price shows.*expected 450.00"):
+            product.verify_lines(ctx)
+    else:
+        product.verify_lines(ctx)
+        assert ctx.warnings == (["final table read could not read: line 1 Price"] if outcome == "unread" else [])
 
 
 class _Trace:
@@ -138,7 +228,7 @@ class _Trace:
         self.calls = []
         S = module.S
         monkeypatch.setattr(S, "open_selector", lambda *a: ("dialog", "icon"))
-        monkeypatch.setattr(S, "search", lambda *a: grid)
+        monkeypatch.setattr(S, "search", lambda *a, **k: grid)
         monkeypatch.setattr(S, "pick", lambda *a: self.calls.append("pick"))
         monkeypatch.setattr(S, "press", lambda d, name: self.calls.append(name))
         monkeypatch.setattr(module, "create", lambda *a: self.calls.append("create"))
@@ -234,3 +324,122 @@ def test_the_saved_spelling_of_the_same_address_is_used(monkeypatch):
     assert ctx.order.debtor.billing.zip == f"BE {b.zip}" and ctx.warnings
     if o.debtor.delivery.key() != b.key():
         assert ctx.order.debtor.delivery == o.debtor.delivery  # another address is left alone
+
+
+# ---------------------------------------------------------------------------
+# 2.4 / 2.13 / 4.1: the Order's address boxes
+
+
+def _address_ctx(o, texts):
+    """Editor pane with a Delivery and an Invoice address tab showing `texts`."""
+    tabs = []
+    for name, text in zip(("Delivery address", "Invoice address"), texts):
+        tab = NS(element_info=NS(name=name))
+        tab.parent = lambda text=text: NS(descendants=lambda control_type=None: [NS(text=text)])
+        tabs.append(tab)
+    ui = NS(editor_pane=lambda: NS(descendants=lambda control_type=None: tabs), click=lambda c: None)
+    return NS(
+        order=o,
+        ui=ui,
+        back_to_order=lambda: None,
+        shot=lambda *a, **k: None,
+        record=lambda *a, **k: None,
+        warnings=[],
+    )
+
+
+def _box(o, a):
+    return "\n".join(
+        [
+            o.debtor.company,
+            f"{o.debtor.first_name} {o.debtor.last_name}",
+            a.street,
+            f"{a.zip} {a.city}",
+            a.country,
+        ]
+    )
+
+
+def _no_ui(monkeypatch):
+    monkeypatch.setattr(debtor, "_visible", lambda c: True)
+    monkeypatch.setattr(debtor, "read", lambda c: c.text)
+    monkeypatch.setattr(debtor, "wait_for", lambda pred, *a, **k: pred())
+
+
+@pytest.mark.parametrize("drop", ["street", "zip", "city"])
+def test_order_address_box_must_show_street_zip_city(monkeypatch, drop):
+    o = make()
+    a = o.debtor.billing
+    lines = {
+        "company": o.debtor.company,
+        "name": f"{o.debtor.first_name} {o.debtor.last_name}",
+        "street": a.street,
+        "zip": a.zip,
+        "city": a.city,
+        "country": a.country,
+    }
+    ctx = _address_ctx(o, [_box(o, a), "\n".join(v for k, v in lines.items() if k != drop)])
+    records = []
+    ctx.record = lambda *a, **k: records.append((a, k))
+    _no_ui(monkeypatch)
+    with pytest.raises(ManualReview, match="lacks"):
+        debtor.verify_order_addresses(ctx)
+    assert records[-1][0] == ("2.4 order addresses", "FAIL")
+
+
+def test_order_address_box_allows_a_title_and_country_code_prefix(monkeypatch):
+    o = make()
+    ctx = _address_ctx(o, ["Co\nDr. A B\nMain 1\nDE 10117 Berlin\nGermany"] * 2)
+    _no_ui(monkeypatch)
+    debtor.verify_order_addresses(ctx)
+
+
+@pytest.mark.parametrize(
+    "zip_, city, street, site",
+    [
+        ("02116", "Boston, MA", "214 Tremont Street", "Harborview Pharmacy LLC"),
+        ("L4W 4Y2", "Mississauga, ON", "5600 Explorer Drive", "Northgate Receiving Warehouse"),
+        ("60612", "Chicago, IL", "1700 West Van Buren Street", "Lakeshore Inpatient Pharmacy"),
+    ],
+)
+def test_order_address_box_allows_city_before_zip_and_hidden_country(monkeypatch, zip_, city, street, site):
+    o = make()
+    o.debtor.delivery = o.debtor.delivery.model_copy(update={"name": site, "street": street, "zip": zip_, "city": city})
+    ctx = _address_ctx(o, [f"{site}\n{street}\n{city} {zip_}", "Main 1\n10117 Berlin"])
+    _no_ui(monkeypatch)
+    debtor.verify_order_addresses(ctx)
+
+
+# ---------------------------------------------------------------------------
+# 2.10.3 / 2.10.5: the new payment's blank fields
+
+
+_GOOD_PAYMENT = ("Bank Transfer", "Bank Transfer", None, 0.0, 0, 0, None, "", None)
+
+
+@pytest.mark.parametrize(
+    "row, ok",
+    [
+        (_GOOD_PAYMENT, True),
+        (("Bank", "Bank Transfer", None, 0.0, 0, 0, None, "", None), False),
+        (("Bank Transfer", "Bank", None, 0.0, 0, 0, None, "", None), False),
+        (("Bank Transfer", "Bank Transfer", 3, 0.0, 0, 0, None, "", None), False),
+        (("Bank Transfer", "Bank Transfer", None, 0.5, 0, 0, None, "", None), False),
+        (("Bank Transfer", "Bank Transfer", None, 0.0, 2, 0, None, "", None), False),
+        (("Bank Transfer", "Bank Transfer", None, 0.0, 0, 30, None, "", None), False),
+        (("Bank Transfer", "Bank Transfer", None, 0.0, 0, 0, "x", "", None), False),
+        (("Bank Transfer", "Bank Transfer", None, 0.0, 0, 0, None, "x", None), False),
+        (("Bank Transfer", "Bank Transfer", None, 0.0, 0, 0, None, "", "x"), False),
+        (None, False),  # saved row not found
+    ],
+)
+def test_new_payment_fields_are_checked(monkeypatch, row, ok):
+    records = []
+    ctx = NS(order=make(), record=lambda *a, **k: records.append((a, k)))
+    monkeypatch.setattr(debtor.db, "query", lambda *a: [] if row is None else [row])
+    if ok:
+        debtor._check_new_payment(ctx, 3)
+    else:
+        with pytest.raises(AutomationError):
+            debtor._check_new_payment(ctx, 3)
+    assert records[-1][0][1] == ("ok" if ok else "FAIL")

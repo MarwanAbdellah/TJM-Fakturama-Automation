@@ -8,7 +8,7 @@ from decimal import Decimal
 from image2cash.steps.context import Ctx
 from image2cash.ui.core import AutomationError, ManualReview, read, wait_for
 from image2cash.ui.datefield import set_date
-from image2cash.validate import close, money, parse_amount, totals
+from image2cash.validate import close, money, parse_amount, same_place, totals
 from image2cash.verify import db
 
 # shortcut: sign -> ISO code for the locales seen so far; extend when another currency shows up.
@@ -53,8 +53,13 @@ def open_order(ctx: Ctx) -> None:
 
     total = ui.labelled("Total", "Edit", root=ed)
     ui.learn_locale(read(total))
-    booked = booked_currency(read(total))
-    if booked and booked != o.currency:  # stop before typing anything into the new Order
+    shown = read(total)
+    booked = booked_currency(shown)
+    if booked is None:
+        raise ManualReview(
+            f"currency shown by Fakturama {shown!r} is not recognised, so the order's currency cannot be confirmed"
+        )
+    if booked != o.currency:  # stop before typing anything into the new Order
         raise ManualReview(f"order is in {o.currency}, Fakturama books in {booked}")
 
     no = ui.labelled("No.", "Edit", root=ed)
@@ -146,6 +151,11 @@ def complete_and_save(ctx: Ctx) -> None:
         ctx.record("4.3 totals", "FAIL", problems=problems, shot=shot)
         raise ManualReview("order totals differ: " + "; ".join(problems))
     ctx.record("4.3 totals", "ok", ui=got, computed=(net, vat, gross), shot=shot)
+    ctx.warnings += [  # within the tolerance, but still said (README "any difference is a warning")
+        f"Order {k} {got[k]} vs image {want} (catalogue rounding)"
+        for k, want in (("net", o.net_total), ("vat", o.vat_total), ("total", o.gross_total))
+        if money(got[k]) != money(want)
+    ]
 
     # Calibrated Fakturama 2.2.0 bug: saving while the dynamically added
     # 'Delivery address' tab is the active address tab throws an NPE in
@@ -183,6 +193,7 @@ def verify_saved_order(ctx: Ctx) -> None:
         raise AutomationError(f"expected one saved Order, DB has {len(docs)}")
     d = docs[0]
     items = db.document_items(d["id"])
+    receivers = db.document_receiver_details(d["id"])
     from image2cash.steps.debtor import is_debtor_of
 
     checks = {
@@ -192,6 +203,20 @@ def verify_saved_order(ctx: Ctx) -> None:
         "total": close(d["total"], o.gross_total, o.items),
         "items": len(items) == len(o.items),
     }
+    debtor = ctx.order.debtor
+    billing = [r for r in receivers if r["type"] == 3]
+    checks["billing contact"] = len(billing) == 1 and all(
+        (billing[0][key] or "").strip() == want.strip()
+        for key, want in (("company", debtor.company), ("first_name", debtor.first_name), ("name", debtor.last_name))
+    )
+    # Country is not compared here: COUNTRYCODE is a code, while the source carries a name.
+    for label, role, address in (("billing", 3, debtor.billing), ("delivery", 5, debtor.delivery)):
+        rows = [r for r in receivers if r["type"] == role]
+        checks[f"{label} address"] = (
+            len(rows) == 1
+            and (rows[0]["street"] or "").strip() == address.street.strip()
+            and same_place(rows[0]["zip"] or "", rows[0]["city"] or "", address.zip, address.city)
+        ) or (role == 5 and not rows and debtor.same_delivery)
     for src, it in zip(o.items, items):
         checks[f"item {src.pos} sku"] = it["sku"] == src.sku
         checks[f"item {src.pos} qty"] = money(it["qty"]) == money(src.qty)
@@ -199,9 +224,18 @@ def verify_saved_order(ctx: Ctx) -> None:
         checks[f"item {src.pos} discount"] = discount_ok(it["rebate"], src.discount_pct)
         checks[f"item {src.pos} vat"] = abs(it["vat_value"] * 100 - src.vat_pct) < Decimal("0.001")
     failed = [k for k, v in checks.items() if not v]
-    ui.nav("Documents")
+    ui.show_documents("Orders", o.external_ref)
     shot = ctx.shot("documents_after_order")
     if failed:
-        ctx.record("4.5 order in DB", "FAIL", failed=failed, db=d, items=items, shot=shot)
+        ctx.record("4.5 order in DB", "FAIL", failed=failed, db=d, items=items, receivers=receivers, shot=shot)
         raise AutomationError(f"saved Order differs from source: {failed}")
-    ctx.record("4.5 order in DB", "ok", id=d["id"], number=d["number"], total=d["total"], items=len(items), shot=shot)
+    ctx.record(
+        "4.5 order in DB",
+        "ok",
+        id=d["id"],
+        number=d["number"],
+        total=d["total"],
+        items=len(items),
+        receivers=receivers,
+        shot=shot,
+    )

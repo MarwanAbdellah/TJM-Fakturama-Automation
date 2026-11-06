@@ -33,6 +33,21 @@ def test_split_joined_cells():
     assert parts[1].x0 > 1130
 
 
+def test_selector_list_that_never_stabilizes_stops(monkeypatch):
+    from image2cash.ui import grid
+    from image2cash.ui.core import ManualReview
+
+    ticks = iter([0, 0, 0.2, 0.4, 1])
+    reads = iter(["first", "second", "third"])
+    monkeypatch.setattr(grid.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(grid.time, "sleep", lambda _: None)
+    monkeypatch.setattr(
+        grid, "read_grid", lambda *a: grid.Grid((0, 0, 1, 1), [], [grid.Row(0, {"Name": next(reads)}, {})], [])
+    )
+    with pytest.raises(ManualReview, match="list did not stabilize within 1 seconds"):
+        grid.read_stable(None, ["Name"], timeout=1)
+
+
 def test_split_leaves_single_cells_alone():
     l = Line("CHR-ERG-01", 1.0, 100, 0, 180, 10)
     assert split_on_separators(l, [50, 200]) == [l]

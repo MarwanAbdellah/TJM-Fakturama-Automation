@@ -258,3 +258,50 @@ def document_receivers(document_id: int) -> list[dict]:
 def payment(payment_id: int) -> dict | None:
     rows = query('SELECT "ID", "NAME", "DESCRIPTION", "CODE" FROM "FKT_PAYMENT" WHERE "ID" = ?', (payment_id,))
     return dict(zip(("id", "name", "description", "code"), rows[0])) if rows else None
+
+
+def document_copy_fields(document_id: int) -> dict | None:
+    """Additional saved header fields needed to verify a follow-up Invoice."""
+    rows = query(
+        f'SELECT "SERVICEDATE", "NETGROSS", "FK_NOVATREF" FROM "FKT_DOCUMENT" WHERE "ID" = ? AND {live()}',
+        (document_id,),
+    )
+    if not rows:
+        return None
+    service_date, net_gross, no_vat_ref = rows[0]
+    return dict(
+        service_date=str(service_date)[:10] if service_date is not None else None,
+        net_gross=net_gross,
+        no_vat_ref=no_vat_ref,
+    )
+
+
+def document_receiver_details(document_id: int) -> list[dict]:
+    """Compare saved address snapshots, not mutable contact master records."""
+    rows = query(
+        'SELECT "BILLINGTYPE", "ORIGINCONTACTID", "ORIGINADDRESSID", "COMPANY", "FIRSTNAME", "NAME", '
+        '"STREET", "ZIP", "CITY", "COUNTRYCODE", "NAME_ADDON", "CITYADDON", "MANUALADDRESS", '
+        '"DESCRIPTION", "TITLE", "EMAIL", "PHONE" '
+        f'FROM "FKT_DOCUMENTRECEIVER" WHERE "FK_DOCUMENT" = ? AND {live()} ORDER BY "ID"',
+        (document_id,),
+    )
+    keys = (
+        "type",
+        "contact_id",
+        "address_id",
+        "company",
+        "first_name",
+        "name",
+        "street",
+        "zip",
+        "city",
+        "country",
+        "name_addon",
+        "city_addon",
+        "manual_address",
+        "description",
+        "title",
+        "email",
+        "phone",
+    )
+    return [dict(zip(keys, r)) for r in rows]

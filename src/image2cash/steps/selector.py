@@ -38,21 +38,26 @@ def open_selector(ctx: Ctx, icon_label: str, title: str):
     return ui.dialog(title), icon
 
 
-def search(ctx: Ctx, dialog, term: str, headers: list[str]) -> G.Grid | None:
-    """Paste ``term``; return the stabilized grid, or None if the dialog auto-accepted."""
+def search(ctx: Ctx, dialog, term: str, headers: list[str], auto_accepts: bool = True) -> G.Grid | None:
+    """Paste ``term``; return the stabilized grid, or None if the dialog auto-accepted.
+
+    ``auto_accepts=False`` skips the 1 s auto-accept wait: 'Select the address' never
+    auto-accepted in 33 single-row runs (it needs a click + OK). Were it to, reading the
+    closed dialog's grid fails and the run stops; it never picks wrongly."""
     edit = G.search_edit(dialog)
     dialog.set_focus()
     edit.click_input()
     _paste(term)
     title = dialog.window_text()
     log.debug("search %r in %r", term, title)
-    try:  # a unique match auto-accepts and closes the dialog; poll instead of a fixed 1 s wait
-        # by handle: a dialog found on the Desktop (title '') is not one of Fakturama's child
-        # windows, so a by-title check saw it as closed and an unpicked search passed as accepted
-        wait_for(lambda: _gone(dialog), 1.0, interval=0.1, what="selector auto-accept")
-        return None
-    except AutomationError:
-        pass
+    if auto_accepts:
+        try:  # a unique match auto-accepts and closes the dialog; poll instead of a fixed 1 s wait
+            # by handle: a dialog found on the Desktop (title '') is not one of Fakturama's child
+            # windows, so a by-title check saw it as closed and an unpicked search passed as accepted
+            wait_for(lambda: _gone(dialog), 1.0, interval=0.1, what="selector auto-accept")
+            return None
+        except AutomationError:
+            pass
     pane = G.grid_below_search(dialog)
     grid = G.read_stable(pane.rectangle(), headers, owner=dialog)
     # shortcut: no paging in selectors; an exact SKU/company search rarely fills the list. Page if it ever does.

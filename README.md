@@ -100,7 +100,7 @@ or Resume with its command, and each exit code.
 >
 > | Folder | What it holds | Who sets it |
 > |---|---|---|
-> | **Workspace** (Eclipse `-data`) | Fakturama's settings, including where the working directory is | The tool: `C:\Users\<you>\.fakturama2_test` (or `FAKTURAMA_WORKSPACE` in `.env`) |
+> | **Workspace** (Eclipse `-data`) | Fakturama's settings, including where the working directory is | The tool: `.fakturama2_test` in your user folder, e.g. `C:\Users\Marwan\.fakturama2_test` (or `FAKTURAMA_WORKSPACE` in `.env`) |
 > | **Working directory** | The database and documents | **You**, once, in Fakturama's first-start dialog. Pick a new, empty folder, e.g. `D:\Fakturama_Test_Working` |
 >
 > Opening Fakturama from the Start menu uses its *default* workspace, which is
@@ -134,10 +134,14 @@ or Resume with its command, and each exit code.
    setting in its database (`FKT_USERPROPERTY`), and only Preferences updates
    both. Check it by opening a New Order: its Total must show `€`. The run's
    currency guard stops any order in another currency before typing anything.
-   Then start Fakturama on that workspace:
-   ```bash
-   "D:/Fakturama/Fakturama2/Fakturama.exe" -data "C:/Users/<you>/.fakturama2_test"
+   Then start Fakturama on that workspace. In PowerShell (replace the first path with
+   where *your* `Fakturama.exe` is; `$env:USERPROFILE` fills in your user folder, so
+   don't type a user name):
+   ```powershell
+   & "C:\Program Files\Fakturama2\Fakturama.exe" -data "$env:USERPROFILE\.fakturama2_test"
    ```
+   The app's "Fakturama is not open" message prints this command with your real
+   paths already filled in.
    In the Streamlit app you can skip this: **Book this order** starts Fakturama on
    the configured workspace if it is closed (about 70 s), then runs the order. It
    refuses to start a second Fakturama while another program holds the database port.

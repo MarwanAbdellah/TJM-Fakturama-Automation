@@ -54,7 +54,7 @@ on the fresh row. Only if that also fails does the run stop for manual review.
 - **Chain:** the template parser first. If it fails, or its draft does not
   pass `check_order`, *and* the caller opted in (`--ai`, or the app toggle),
   `extract/vision.py` asks an AI model to read the image (any OpenAI-compatible
-  chat API, Gemini `gemini-3.6-flash` by default; JSON-schema output into
+  chat API, OpenRouter `nvidia/nemotron-3.5-super-vl` by default; JSON-schema output into
   `OrderDraft`). It first used Claude; it was switched so no Anthropic API is needed.
 - **Same checks either way:** `check_order`, human review in the app, and the
   DB checks.

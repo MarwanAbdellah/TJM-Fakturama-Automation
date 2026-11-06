@@ -18,7 +18,7 @@ def main(argv: list[str] | None = None) -> int:
     e.add_argument(
         "--ai",
         action="store_true",
-        help="if the parser fails, let an AI model read the image (Gemini by default; sends it off this machine)",
+        help="if the parser fails, let an AI model read the image (OpenRouter by default; sends it off this machine)",
     )
 
     r = sub.add_parser("run", help="full Order-first flow against the running Fakturama")
@@ -29,7 +29,7 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument(
         "--ai",
         action="store_true",
-        help="if the parser fails, let an AI model read the image (Gemini by default; sends it off this machine)",
+        help="if the parser fails, let an AI model read the image (OpenRouter by default; sends it off this machine)",
     )
 
     v = sub.add_parser("verify", help="read-only DB check of the documents for a Cust.Ref.")

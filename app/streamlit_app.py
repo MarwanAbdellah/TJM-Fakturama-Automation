@@ -457,10 +457,9 @@ uploads = a.file_uploader("Order images or PDFs", type=["png", "jpg", "jpeg", "p
 picks = b.multiselect("...or bundled samples", SAMPLES)
 ai = st.toggle(
     "AI fallback for unknown layouts",
-    value=True,
     help="If the local parser cannot read a file, or its result fails the checks, send the image to "
-    "an AI model (Gemini by default; VLM_BASE_URL / VLM_MODEL in .env) to read it. Turn it off to keep "
-    "the image on this machine (it leaves it unless VLM_BASE_URL is a local server). Needs VLM_API_KEY in .env.",
+    "an AI model (OpenRouter by default; VLM_BASE_URL / VLM_MODEL in .env) to read it. Off by default: "
+    "the image leaves this machine unless VLM_BASE_URL is a local server. Needs VLM_API_KEY in .env.",
 )
 for name, data in [(f.name, f.getvalue()) for f in uploads or []] + [
     (n, (SAMPLES_DIR / n).read_bytes()) for n in picks

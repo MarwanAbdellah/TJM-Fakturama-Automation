@@ -1,7 +1,7 @@
 """Opt-in fallback for layouts the template parser cannot read: an AI model reads the image.
 
 Any OpenAI-compatible chat-completions API works (config.VLM_BASE_URL / VLM_MODEL / VLM_API_KEY);
-the default is Gemini. The image leaves this machine unless the URL is a local server, so it
+the default is OpenRouter. The image leaves this machine unless the URL is a local server, so it
 only runs when the caller asks for it (app toggle, ``--ai`` on the CLI). Its draft goes through
 the same ``check_order``, human review and DB checks as a parsed one; it has no field boxes.
 """
@@ -57,7 +57,7 @@ def _api_error(r) -> str:
     """'AI API error 503: <the provider's own message> (<what to do>)'."""
     try:
         body = r.json()
-        body = body[0] if isinstance(body, list) else body  # Gemini wraps the error in a list
+        body = body[0] if isinstance(body, list) else body  # some providers (Gemini) wrap the error in a list
         msg = body["error"]["message"]
     except Exception:  # noqa: BLE001 - not the usual error shape: show the raw text
         msg = (r.text or "").strip()[:300]

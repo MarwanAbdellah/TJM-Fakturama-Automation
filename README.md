@@ -7,7 +7,7 @@
 [![OCR](https://img.shields.io/badge/OCR-indra--ocr%201.1-6A5ACD.svg)](https://pypi.org/project/indra-ocr/)
 [![pypdfium2](https://img.shields.io/badge/PDF-pypdfium2%205.14-8A2BE2.svg)](https://pypdfium2.readthedocs.io/)
 [![HSQLDB](https://img.shields.io/badge/HSQLDB-JayDeBeApi%201.2-8B4513.svg)](https://github.com/baztian/jaydebeapi)
-[![AI fallback](https://img.shields.io/badge/AI%20fallback-OpenAI--compatible%20%28Gemini%20default%29-4285F4.svg)](https://ai.google.dev/gemini-api/docs/openai)
+[![AI fallback](https://img.shields.io/badge/AI%20fallback-OpenRouter%20%28OpenAI--compatible%29-6467F2.svg)](https://openrouter.ai/)
 [![uv](https://img.shields.io/badge/uv-managed-green.svg)](https://docs.astral.sh/uv/)
 [![pytest](https://img.shields.io/badge/tests-pytest-0A9EDC.svg)](https://docs.pytest.org/)
 [![Ruff](https://img.shields.io/badge/lint%20%26%20format-ruff-E6001A.svg)](https://docs.astral.sh/ruff/)
@@ -134,9 +134,10 @@ After you press a Book button, don't touch the mouse or keyboard until the page 
 uv run image2cash extract samples/order_RX-2001.png
 ```
 **AI fallback** for layouts the parser can't read. It sends the image to an
-AI model: on by default in the app (turn the toggle off to keep images local),
-opt-in on the CLI (`--ai`). Busy or rate-limited replies are retried 4 times. Any OpenAI-compatible chat API works; the default is Gemini
-(`gemini-3.6-flash`) and needs a key from Google AI Studio. Copy
+AI model, so it is off unless you ask for it (the toggle in the app, `--ai` on
+the CLI). Busy or rate-limited replies are retried 4 times. Any OpenAI-compatible
+chat API works; the default is OpenRouter (`nvidia/nemotron-3.5-super-vl`, a vision model) and needs
+a key from openrouter.ai. Copy
 `.env.example` to `.env` and put the key in `VLM_API_KEY`:
 ```bash
 cp .env.example .env
@@ -310,7 +311,7 @@ cd tools/diagrams && npm install && node make_diagrams.mjs
 app/streamlit_app.py     upload → boxes → review → preview → proceed → live log → result
 src/image2cash/
   extract/   ocr.py (Indra + boxes, PDF page 1), layout.py (label-anchored parser, field boxes),
-             vision.py (opt-in AI fallback, Gemini by default)
+             vision.py (opt-in AI fallback, OpenRouter by default)
   ui/        core.py (locators, editors, screenshots), grid.py (OCR grids), datefield.py
   steps/     order.py, debtor.py, product.py, invoice.py, selector.py, context.py
   verify/    db.py (read-only HSQLDB)

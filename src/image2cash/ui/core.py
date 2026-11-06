@@ -109,7 +109,7 @@ def start_fakturama(timeout: float = 180, first_run_timeout: float = 600) -> int
             "install folders). Set FAKTURAMA_HOME in .env to the folder that holds Fakturama.exe."
         )
     # A new workspace: Fakturama asks for a working directory first; give the user time to answer.
-    first_run = config.workdir() is None
+    first_run = config.first_run()
     log.info("starting %s on %s%s", home / config.EXE, config.WORKSPACE, " (first run)" if first_run else "")
     subprocess.Popen(
         [str(home / config.EXE), "-data", str(config.WORKSPACE)],

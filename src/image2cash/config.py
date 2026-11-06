@@ -129,9 +129,15 @@ PREFS_FILE = WORKSPACE / ".metadata/.plugins/org.eclipse.core.runtime/.settings/
 def workdir() -> Path | None:
     """Fakturama's working directory for WORKSPACE. Its window is titled 'Fakturama - <workdir>'
     and only that window is ever driven (another open Fakturama, e.g. the live one, is left
-    alone). None until Fakturama has run once on the workspace."""
-    v = os.getenv("FAKTURAMA_WORKDIR") or read_prefs(PREFS_FILE).get("GENERAL_WORKSPACE")
+    alone). What Fakturama saved wins: it is what its window shows. FAKTURAMA_WORKDIR is only
+    a fallback for a workspace Fakturama has not saved one for. None until then."""
+    v = read_prefs(PREFS_FILE).get("GENERAL_WORKSPACE") or os.getenv("FAKTURAMA_WORKDIR")
     return Path(v) if v else None
+
+
+def first_run() -> bool:
+    """Fakturama has never opened WORKSPACE: starting it shows the working-directory dialog."""
+    return not PREFS_FILE.is_file()
 
 
 def db_url() -> str:

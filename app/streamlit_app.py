@@ -50,6 +50,13 @@ SECTIONS = {  # key prefix -> (label, colour)
     "gross_total": ("Totals", "#dc2626"),
     "": ("Order", "#0f766e"),
 }
+
+
+def plain(text: str) -> str:
+    """Show text as written: Markdown would hide the backslash in a path such as 'F:\\x\\.y'."""
+    return text.replace("\\", "\\\\")
+
+
 EXIT = {
     0: ("Done and verified", "success"),
     1: ("Automation error", "error"),
@@ -306,7 +313,7 @@ def show_run(run_dir: Path, code: int | None, sha: str | None = None) -> None:
     else:
         text, kind = EXIT.get(code, (f"exit {code}", "error"))
         if why := stop_reason(log):  # say why up front; the step table below has the detail
-            text += f"\n\n**Stopped at {why}**"
+            text += f"\n\n**Stopped at {plain(why)}**"
         getattr(st, kind)(text)
     # run.log has every step and UI action; output.log is the raw console (crashes before logging started).
     lines = tail(run_dir / "run.log", 15 if code is None else 60) or tail(run_dir / "output.log", 60)
@@ -451,18 +458,28 @@ with st.sidebar:
         )
 
 SAMPLES_DIR = Path(__file__).resolve().parents[1] / "samples"
-SAMPLES = sorted(p.name for p in SAMPLES_DIR.iterdir() if p.suffix.lower() in (".png", ".jpg", ".pdf"))
-a, b = st.columns([3, 2])
-uploads = a.file_uploader("Order images or PDFs", type=["png", "jpg", "jpeg", "pdf"], accept_multiple_files=True)
-picks = b.multiselect("...or bundled samples", SAMPLES)
+# Friendly names for some bundled samples; shown as the options themselves (AppTest cannot
+# drive format_func), and mapped back to the file below.
+SAMPLE_LABELS = {"order_WEB-2026-0714-A17.png": "Home Test Example"}
+SAMPLE_FILES = {
+    SAMPLE_LABELS.get(p.name, p.name): p.name
+    for p in sorted(SAMPLES_DIR.iterdir())
+    if p.suffix.lower() in (".png", ".jpg", ".pdf")
+}
+SAMPLES = sorted(SAMPLE_FILES, key=lambda label: (label not in SAMPLE_LABELS.values(), label))  # named ones first
+a, b = st.columns([2, 3])
+picks = [SAMPLE_FILES[label] for label in a.multiselect("Bundled samples", SAMPLES, default=["Home Test Example"])]
+uploads = b.file_uploader(
+    "...or your own order images or PDFs", type=["png", "jpg", "jpeg", "pdf"], accept_multiple_files=True
+)
 ai = st.toggle(
     "AI fallback for unknown layouts",
     help="If the local parser cannot read a file, or its result fails the checks, send the image to "
     "an AI model (OpenRouter by default; LLM_BASE_URL / LLM_MODEL in .env) to read it. Off by default: "
     "the image leaves this machine unless LLM_BASE_URL is a local server. Needs LLM_API_KEY in .env.",
 )
-for name, data in [(f.name, f.getvalue()) for f in uploads or []] + [
-    (n, (SAMPLES_DIR / n).read_bytes()) for n in picks
+for name, src, data in [(f.name, f.name, f.getvalue()) for f in uploads or []] + [
+    (f"{SAMPLE_LABELS[n]} ({n})" if n in SAMPLE_LABELS else n, n, (SAMPLES_DIR / n).read_bytes()) for n in picks
 ]:
     sha = hashlib.sha1(data).hexdigest()[:12]
     known = ss.orders.get(sha)
@@ -470,7 +487,7 @@ for name, data in [(f.name, f.getvalue()) for f in uploads or []] + [
     retry = known and known.get("attempt", 0) != attempt
     if known and not retry and not (ai and not known["ai_tried"] and known["problems"] and known["status"] == "new"):
         continue
-    path = RUNS / "uploads" / f"{sha}{Path(name).suffix.lower()}"
+    path = RUNS / "uploads" / f"{sha}{Path(src).suffix.lower()}"
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.exists():
         path.write_bytes(data)
@@ -556,14 +573,14 @@ fk_ok, fk_msg = fakturama_ready()
 fk_closed = not fk_ok and "is not open" in fk_msg  # Book starts it; any other problem needs a human
 if problems:
     for pr in problems:
-        st.error(pr)
+        st.error(plain(pr))
 elif draft is not None:
     st.success("All arithmetic and format checks pass.")
     rows = preview(draft) if fk_ok else [("Fakturama", "closed: Book starts it" if fk_closed else fk_msg)]
     if fk_closed:
         st.info("Fakturama is closed. Booking starts it on the test workspace first.")
     elif not fk_ok:
-        st.error(fk_msg)
+        st.error(plain(fk_msg))
     st.table(pd.DataFrame(rows, columns=["What", "Fakturama will"]))
 
 busy = running() or bool(ss.queue) or ss.current is not None
@@ -575,7 +592,7 @@ def ensure_fakturama() -> bool:
     from image2cash import config
     from image2cash.ui.core import AutomationError, start_fakturama
 
-    first = "" if config.workdir() else " First run: choose a working directory in Fakturama's dialog."
+    first = " First run: choose a working directory in Fakturama's dialog." if config.first_run() else ""
     try:
         with st.spinner(f"Starting Fakturama on the test workspace…{first}"):
             start_fakturama()
@@ -640,7 +657,7 @@ if ss.paused:
 elif ss.queue or ss.current:
     c3.info(f"Booking {ss.orders[ss.current]['name'] if ss.current else '…'}; {len(ss.queue)} waiting.")
 if ss.get("start_error"):
-    st.error(ss.start_error)
+    st.error(plain(ss.start_error))
 if ss.skipped and not (ss.queue or ss.current):
     st.warning(f"Batch finished; {len(ss.skipped)} order(s) skipped. Fakturama may hold their half-done editors.")
     st.table(pd.DataFrame(ss.skipped, columns=["Order", "Why it was skipped"]))

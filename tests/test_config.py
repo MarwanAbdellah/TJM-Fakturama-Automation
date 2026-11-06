@@ -48,3 +48,13 @@ def test_a_new_workspace_is_picked_up_without_a_restart(tmp_path, monkeypatch):
     assert config.workdir() is None  # Fakturama has not run on it yet
     config.PREFS_FILE.write_text("GENERAL_WORKSPACE=F" + "\\" + ":" + "\\" + "\\" + "test\n", encoding="latin-1")
     assert str(config.workdir()) == "F:" + "\\" + "test"  # Fakturama asked, the user chose F:\test
+
+
+def test_what_fakturama_saved_wins_over_env(tmp_path, monkeypatch):
+    """The friend's .env named one working directory; Fakturama's first-run dialog saved another."""
+    bs = "\\"
+    monkeypatch.setenv("FAKTURAMA_WORKDIR", f"F:{bs}Games{bs}Fakturama2{bs}Fakturama_Test_Working")
+    monkeypatch.setattr(config, "PREFS_FILE", tmp_path / "fakturama.prefs")
+    assert config.first_run() and str(config.workdir()).endswith("Fakturama_Test_Working")  # fallback
+    config.PREFS_FILE.write_text(f"GENERAL_WORKSPACE=F{bs}:{bs}{bs}test\n", encoding="latin-1")
+    assert not config.first_run() and str(config.workdir()) == f"F:{bs}test"  # what the window shows

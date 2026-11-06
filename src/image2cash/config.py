@@ -121,16 +121,32 @@ def hsql_jar() -> Path | None:
 # Eclipse workspace (-data) the automation runs against: a copy, never the live one.
 WORKSPACE = Path(os.getenv("FAKTURAMA_WORKSPACE") or Path.home() / ".fakturama2_test")
 # Fakturama keeps its working directory and database login in the workspace's preferences.
-PREFS = read_prefs(WORKSPACE / ".metadata/.plugins/org.eclipse.core.runtime/.settings/com.sebulli.fakturama.rcp.prefs")
-# Its window is titled 'Fakturama - <WORKDIR>' and only that window is ever driven (another
-# open Fakturama, e.g. the live one, is left alone). None until the workspace was opened once.
-_workdir = os.getenv("FAKTURAMA_WORKDIR") or PREFS.get("GENERAL_WORKSPACE")
-WORKDIR = Path(_workdir) if _workdir else None
-HSQL_URL = (
-    os.getenv("HSQL_URL") or PREFS.get("jakarta.persistence.jdbc.url") or "jdbc:hsqldb:hsql://localhost:9001/fakdbneu"
-)
-HSQL_USER = os.getenv("HSQL_USER") or PREFS.get("jakarta.persistence.jdbc.user") or "SA"
-HSQL_PASSWORD = os.getenv("HSQL_PASSWORD", PREFS.get("jakarta.persistence.jdbc.password", ""))
+# They are read on every call, not once: a new workspace gets them only when Fakturama first
+# runs on it and asks for a working directory, which can be after this app has started.
+PREFS_FILE = WORKSPACE / ".metadata/.plugins/org.eclipse.core.runtime/.settings/com.sebulli.fakturama.rcp.prefs"
+
+
+def workdir() -> Path | None:
+    """Fakturama's working directory for WORKSPACE. Its window is titled 'Fakturama - <workdir>'
+    and only that window is ever driven (another open Fakturama, e.g. the live one, is left
+    alone). None until Fakturama has run once on the workspace."""
+    v = os.getenv("FAKTURAMA_WORKDIR") or read_prefs(PREFS_FILE).get("GENERAL_WORKSPACE")
+    return Path(v) if v else None
+
+
+def db_url() -> str:
+    return (
+        os.getenv("HSQL_URL")
+        or read_prefs(PREFS_FILE).get("jakarta.persistence.jdbc.url")
+        or "jdbc:hsqldb:hsql://localhost:9001/fakdbneu"
+    )
+
+
+def db_login() -> tuple[str, str]:
+    p = read_prefs(PREFS_FILE)
+    user = os.getenv("HSQL_USER") or p.get("jakarta.persistence.jdbc.user") or "SA"
+    return user, os.getenv("HSQL_PASSWORD", p.get("jakarta.persistence.jdbc.password", ""))
+
 
 RUNS_DIR = Path(os.getenv("IMAGE2CASH_RUNS", Path(__file__).resolve().parents[2] / "runs"))
 

@@ -23,8 +23,16 @@ from pathlib import Path
 
 from image2cash import config
 
-# No working directory known: match nothing, so target_instance says what to set.
-MAIN_TITLE = "Fakturama - " + re.escape(str(config.WORKDIR)) + "$" if config.WORKDIR else r"(?!)"
+
+def main_title(workdir: Path | None) -> str:
+    """Title regex of the Fakturama window for ``workdir``. Windows paths ignore case, and
+    'F:\\test' and 'f:\\test\\' are the same folder. No working directory known: match nothing,
+    so target_instance says what to set."""
+    if not workdir:
+        return r"(?!)"
+    return r"(?i)Fakturama - " + re.escape(str(workdir).rstrip("\\/")) + r"[\\/]?$"
+
+
 log = logging.getLogger("image2cash.ui")
 
 
@@ -75,12 +83,12 @@ def listener_pid(netstat: str, port: int) -> int | None:
 
 
 def _db_port_owner() -> tuple[int, int | None]:
-    port = int(re.search(r":(\d+)/", config.HSQL_URL)[1])
+    port = int(re.search(r":(\d+)/", config.db_url())[1])
     out = subprocess.run(["netstat", "-ano", "-p", "TCP"], capture_output=True, text=True, timeout=10).stdout
     return port, listener_pid(out, port)
 
 
-def start_fakturama(timeout: float = 180) -> int:
+def start_fakturama(timeout: float = 180, first_run_timeout: float = 600) -> int:
     """The configured Fakturama, started on the test workspace if it is closed. Returns its pid
     once its window is up and it serves the database. Never starts a second instance while
     another program (e.g. the live Fakturama) holds the database port."""
@@ -100,45 +108,45 @@ def start_fakturama(timeout: float = 180) -> int:
             "Fakturama.exe was not found (not running, not on PATH, not in the registry or the usual "
             "install folders). Set FAKTURAMA_HOME in .env to the folder that holds Fakturama.exe."
         )
-    if config.WORKDIR is None:
-        raise AutomationError(
-            f"The workspace {config.WORKSPACE} has no Fakturama working directory yet. Open it once "
-            f'by hand ("{home / config.EXE}" -data "{config.WORKSPACE}") or set FAKTURAMA_WORKDIR in .env.'
-        )
-    log.info("starting %s on %s", home / config.EXE, config.WORKSPACE)
+    # A new workspace: Fakturama asks for a working directory first; give the user time to answer.
+    first_run = config.workdir() is None
+    log.info("starting %s on %s%s", home / config.EXE, config.WORKSPACE, " (first run)" if first_run else "")
     subprocess.Popen(
         [str(home / config.EXE), "-data", str(config.WORKSPACE)],
         cwd=str(home),
         creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
         close_fds=True,
     )
-    pid = wait_for(target_instance, timeout, interval=1, what="Fakturama to start")
+    what = "Fakturama to start" + (" (choose its working directory in Fakturama's dialog)" if first_run else "")
+    pid = wait_for(target_instance, first_run_timeout if first_run else timeout, interval=1, what=what)
     time.sleep(5)  # the window and the DB come up before the workbench finishes loading its views
     return pid
 
 
 def target_instance() -> int:
-    """PID of the Fakturama window for config.WORKDIR, and only if that same process serves
+    """PID of the Fakturama window for config.workdir(), and only if that same process serves
     the database we read. Two Fakturama instances (test + live) cannot both own port 9001,
     and reading one while driving the other would verify the wrong data."""
     from pywinauto import Desktop
 
-    pids = {
-        w.process_id()
-        for w in Desktop(backend="win32").windows(visible_only=False)
-        if w.class_name() == "SWT_Window0" and re.match(MAIN_TITLE, w.window_text())
-    }
+    windows = [w for w in Desktop(backend="win32").windows(visible_only=False) if w.class_name() == "SWT_Window0"]
+    wd = config.workdir()
+    pids = {w.process_id() for w in windows if re.match(main_title(wd), w.window_text())}
     if not pids:
         exe = config.fakturama_home() / config.EXE if config.fakturama_home() else config.EXE
+        others = sorted({t for w in windows if (t := w.window_text()).startswith("Fakturama")})
         raise AutomationError(
-            f"Fakturama for {config.WORKDIR or config.WORKSPACE} is not open. Start it with: "
-            f'"{exe}" -data "{config.WORKSPACE}"'
+            f"Fakturama for the working directory {wd or '(unknown)'} (workspace "
+            f"{config.WORKSPACE}) is not open"
+            + (f"; open instead: {others}" if others else "")
+            + f'. Start it with: "{exe}" -data "{config.WORKSPACE}", or set FAKTURAMA_WORKSPACE in .env '
+            "to the workspace that Fakturama window uses."
         )
     port, owner = _db_port_owner()
     if owner not in pids:
         raise AutomationError(
             f"The database on port {port} belongs to another program (pid {owner}), not to Fakturama for "
-            f"{config.WORKDIR}. Close the other Fakturama, then restart the one for {config.WORKDIR}."
+            f"{wd}. Close the other Fakturama, then restart the one for {wd}."
         )
     return owner
 
@@ -160,12 +168,12 @@ class UI:
         pid = target_instance()
         # Maximize first. A minimized window is invisible to UIA (win32 still sees it), and in a
         # small window the Order's fields lie off-screen, so clicks and typing miss them.
-        w32 = Application(backend="win32").connect(process=pid).window(title_re=MAIN_TITLE)
+        w32 = Application(backend="win32").connect(process=pid).window(title_re=main_title(config.workdir()))
         if not w32.is_maximized():
             w32.maximize()
             time.sleep(1)
         self.uia_app = Application(backend="uia").connect(process=pid)
-        self.main = self.uia_app.window(title_re=MAIN_TITLE).wrapper_object()
+        self.main = self.uia_app.window(title_re=main_title(config.workdir())).wrapper_object()
         self.w32_app = Application(backend="win32").connect(process=self.main.process_id())
         self.w32 = self.w32_app.window(handle=self.main.handle)
         self._shot = 0

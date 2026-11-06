@@ -41,8 +41,8 @@ def connect() -> Iterator[Any]:
             os.environ["JAVA_HOME"] = str(jre)
     conn = jaydebeapi.connect(
         "org.hsqldb.jdbc.JDBCDriver",
-        config.HSQL_URL,
-        [config.HSQL_USER, config.HSQL_PASSWORD],
+        config.db_url(),
+        list(config.db_login()),
         [str(jar)],
     )
     try:

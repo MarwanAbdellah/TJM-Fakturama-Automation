@@ -572,10 +572,12 @@ bookable = [k for k, it in ss.orders.items() if not it["problems"] and it["statu
 
 def ensure_fakturama() -> bool:
     """Start Fakturama if it is closed and wait until it serves its database."""
+    from image2cash import config
     from image2cash.ui.core import AutomationError, start_fakturama
 
+    first = "" if config.workdir() else " First run: choose a working directory in Fakturama's dialog."
     try:
-        with st.spinner("Starting Fakturama on the test workspace…"):
+        with st.spinner(f"Starting Fakturama on the test workspace…{first}"):
             start_fakturama()
         ss.start_error = None
         return True

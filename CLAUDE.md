@@ -18,7 +18,7 @@ uv run image2cash extract <image|pdf>          # OCR + validate only, no UI
 ## Hard rules
 
 - **Only the test workspace.** The automation drives the window titled
-  `Fakturama - <config.WORKDIR>`, and only if that process owns the DB port.
+  `Fakturama - <config.workdir()>`, and only if that process owns the DB port.
   `ui.core.target_instance()` enforces this. Never weaken it: a second
   Fakturama (for example the live workspace) owns port 9001, and then every DB
   check would read the wrong data.

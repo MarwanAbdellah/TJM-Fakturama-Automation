@@ -100,7 +100,7 @@ or Resume with its command, and each exit code.
 >
 > | Folder | What it holds | Who sets it |
 > |---|---|---|
-> | **Workspace** (Eclipse `-data`) | Fakturama's settings, including where the working directory is | The tool: `.fakturama2_test` in your user folder, e.g. `C:\Users\Marwan\.fakturama2_test` (or `FAKTURAMA_WORKSPACE` in `.env`) |
+> | **Workspace** (Eclipse `-data`) | Fakturama's settings, including where the working directory is | The tool: `%USERPROFILE%\.fakturama2_test`, i.e. `.fakturama2_test` in your Windows user folder (or `FAKTURAMA_WORKSPACE` in `.env`) |
 > | **Working directory** | The database and documents | **You**, once, in Fakturama's first-start dialog. Pick a new, empty folder, e.g. `D:\Fakturama_Test_Working` |
 >
 > Opening Fakturama from the Start menu uses its *default* workspace, which is

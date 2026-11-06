@@ -540,8 +540,8 @@ class UI:
         'This transaction' node and the debtor node are stale after a save (they keep the last
         document picked by hand), so screenshots showed nothing or another customer.
         Evidence only: never fails a verified run."""
-        self.nav("Documents")
         try:
+            self.nav("Documents")
             tree = [t for t in self.main.descendants(control_type="TreeItem") if t.element_info.name == node]
             tree[0].select()
             time.sleep(0.3)

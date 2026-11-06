@@ -31,14 +31,21 @@ from image2cash.models import PAYMENT_CODE_LABELS, PAYMENT_CODES, OrderDraft, Pa
 from image2cash.validate import check_order, vat_name
 
 RUNS = config.RUNS_DIR
-log = logging.getLogger("image2cash.app")
-if not log.handlers:  # Streamlit re-runs this script on every interaction; add the file once
+
+
+@st.cache_resource  # once per process: each browser tab runs this script in its own thread, and
+def _app_log() -> logging.Logger:  # an unguarded check raced, writing every line 2-3 times
+    lg = logging.getLogger("image2cash.app")
     RUNS.mkdir(parents=True, exist_ok=True)
-    _fh = logging.FileHandler(RUNS / "app.log", encoding="utf-8")
-    _fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)-7s %(message)s"))
-    log.addHandler(_fh)
-    log.setLevel(logging.INFO)
-    log.propagate = False
+    fh = logging.FileHandler(RUNS / "app.log", encoding="utf-8")
+    fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)-7s %(message)s"))
+    lg.handlers = [fh]
+    lg.setLevel(logging.INFO)
+    lg.propagate = False
+    return lg
+
+
+log = _app_log()
 SECTIONS = {  # key prefix -> (label, colour)
     "items": ("Items", "#d97706"),
     "debtor.billing": ("Addresses", "#7c3aed"),

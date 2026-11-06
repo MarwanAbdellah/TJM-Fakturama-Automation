@@ -25,6 +25,6 @@
   the machine, so it is opt-in: `--ai` on the CLI, the toggle in the app
   (off by default). It is a
   plain `requests` call to any OpenAI-compatible `/chat/completions`
-  (`config.VLM_BASE_URL`, `VLM_MODEL`, `VLM_API_KEY`, read from `.env`; OpenRouter
+  (`config.LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY`, read from `.env`; OpenRouter
   `nvidia/nemotron-3.5-super-vl` by default). Its draft has no boxes and `engine="ai-vision"`; never let it skip
   `check_order` or human review. `tests/test_vision.py` fakes the HTTP call.

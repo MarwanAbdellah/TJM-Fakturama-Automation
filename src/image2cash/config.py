@@ -135,8 +135,8 @@ HSQL_PASSWORD = os.getenv("HSQL_PASSWORD", PREFS.get("jakarta.persistence.jdbc.p
 RUNS_DIR = Path(os.getenv("IMAGE2CASH_RUNS", Path(__file__).resolve().parents[2] / "runs"))
 
 # Opt-in AI fallback (a vision language model): any OpenAI-compatible chat-completions API.
-# The default is OpenRouter; point VLM_BASE_URL at a local server (Ollama, LM Studio) to keep
+# The default is OpenRouter; point LLM_BASE_URL at a local server (Ollama, LM Studio) to keep
 # images on this machine. Usually set in .env (see .env.example).
-VLM_BASE_URL = os.getenv("VLM_BASE_URL", "https://openrouter.ai/api/v1")
-VLM_MODEL = os.getenv("VLM_MODEL", "nvidia/nemotron-3.5-super-vl")
-VLM_API_KEY = os.getenv("VLM_API_KEY", "")
+LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://openrouter.ai/api/v1")
+LLM_MODEL = os.getenv("LLM_MODEL", "nvidia/nemotron-3.5-super-vl")
+LLM_API_KEY = os.getenv("LLM_API_KEY", "")

@@ -1,6 +1,6 @@
 """Opt-in fallback for layouts the template parser cannot read: an AI model reads the image.
 
-Any OpenAI-compatible chat-completions API works (config.VLM_BASE_URL / VLM_MODEL / VLM_API_KEY);
+Any OpenAI-compatible chat-completions API works (config.LLM_BASE_URL / LLM_MODEL / LLM_API_KEY);
 the default is OpenRouter. The image leaves this machine unless the URL is a local server, so it
 only runs when the caller asks for it (app toggle, ``--ai`` on the CLI). Its draft goes through
 the same ``check_order``, human review and DB checks as a parsed one; it has no field boxes.
@@ -22,10 +22,10 @@ ENGINE = "ai-vision"
 RETRY = {429, 500, 502, 503, 504}  # busy or rate-limited: worth another try
 WAITS = (3, 10, 30)  # seconds before tries 2, 3 and 4
 HINTS = {
-    400: "the API rejected the request; check VLM_MODEL in .env",
-    401: "check VLM_API_KEY in .env",
-    403: "check VLM_API_KEY in .env",
-    404: "check VLM_MODEL and VLM_BASE_URL in .env",
+    400: "the API rejected the request; check LLM_MODEL in .env",
+    401: "check LLM_API_KEY in .env",
+    403: "check LLM_API_KEY in .env",
+    404: "check LLM_MODEL and LLM_BASE_URL in .env",
     429: "rate limit or quota reached; wait or check the API plan",
     503: "the model is overloaded; try again in a few minutes",
 }
@@ -88,12 +88,12 @@ def vision_draft(image: Path, post=requests.post, sleep=time.sleep, feedback: li
     media = MEDIA.get(image.suffix.lower())
     if media is None:
         raise VisionError(f"unsupported image type {image.suffix}")
-    local = config.VLM_BASE_URL.startswith(("http://localhost", "http://127.0.0.1"))
-    if not config.VLM_API_KEY and not local:
-        raise VisionError("no API key: set VLM_API_KEY in .env")
+    local = config.LLM_BASE_URL.startswith(("http://localhost", "http://127.0.0.1"))
+    if not config.LLM_API_KEY and not local:
+        raise VisionError("no API key: set LLM_API_KEY in .env")
     data = base64.standard_b64encode(image.read_bytes()).decode()
     body = {
-        "model": config.VLM_MODEL,
+        "model": config.LLM_MODEL,
         "messages": [
             {
                 "role": "user",
@@ -112,13 +112,13 @@ def vision_draft(image: Path, post=requests.post, sleep=time.sleep, feedback: li
         r = None
         try:
             r = post(
-                config.VLM_BASE_URL.rstrip("/") + "/chat/completions",
+                config.LLM_BASE_URL.rstrip("/") + "/chat/completions",
                 json=body,
-                headers={"Authorization": f"Bearer {config.VLM_API_KEY}"},
+                headers={"Authorization": f"Bearer {config.LLM_API_KEY}"},
                 timeout=180,
             )
         except requests.RequestException as exc:
-            error = f"AI API unreachable: {exc} (check the network and VLM_BASE_URL)"
+            error = f"AI API unreachable: {exc} (check the network and LLM_BASE_URL)"
         else:
             if r.status_code == 200:
                 break

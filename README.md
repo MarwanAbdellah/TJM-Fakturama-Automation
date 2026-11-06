@@ -146,11 +146,11 @@ AI model, so it is off unless you ask for it (the toggle in the app, `--ai` on
 the CLI). Busy or rate-limited replies are retried 4 times. Any OpenAI-compatible
 chat API works; the default is OpenRouter (`nvidia/nemotron-3.5-super-vl`, a vision model) and needs
 a key from openrouter.ai. Copy
-`.env.example` to `.env` and put the key in `VLM_API_KEY`:
+`.env.example` to `.env` and put the key in `LLM_API_KEY`:
 ```bash
 cp .env.example .env
 ```
-Another provider or model: change `VLM_BASE_URL` and `VLM_MODEL` in `.env`.
+Another provider or model: change `LLM_BASE_URL` and `LLM_MODEL` in `.env`.
 `.env` is git-ignored; a variable set in the shell overrides it.
 A local server (Ollama, LM Studio on `http://localhost...`) needs no key and
 keeps the image on this machine.

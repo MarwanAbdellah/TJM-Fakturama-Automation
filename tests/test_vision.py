@@ -17,8 +17,8 @@ TRUTH = parse(load(Path(__file__).parent / "fixtures" / "order_WEB-2026-0714-A17
 
 @pytest.fixture(autouse=True)
 def gemini(monkeypatch):
-    monkeypatch.setattr(vision.config, "VLM_BASE_URL", "https://example.test/v1beta/openai/")
-    monkeypatch.setattr(vision.config, "VLM_API_KEY", "test-key")
+    monkeypatch.setattr(vision.config, "LLM_BASE_URL", "https://example.test/v1beta/openai/")
+    monkeypatch.setattr(vision.config, "LLM_API_KEY", "test-key")
 
 
 def fake_post(content: str, status: int = 200, finish: str = "stop", seen: list | None = None):
@@ -37,7 +37,7 @@ def test_request_and_parse():
     url, body, headers = seen[0]
     assert url == "https://example.test/v1beta/openai/chat/completions"
     assert headers["Authorization"] == "Bearer test-key"
-    assert body["model"] == vision.config.VLM_MODEL
+    assert body["model"] == vision.config.LLM_MODEL
     assert body["messages"][0]["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
     assert body["response_format"]["type"] == "json_schema"
     assert draft.items == TRUTH.items and draft.gross_total == TRUTH.gross_total
@@ -59,10 +59,10 @@ def test_bad_replies_are_errors(post, match):
 
 
 def test_no_key_is_an_error_unless_the_server_is_local(monkeypatch):
-    monkeypatch.setattr(vision.config, "VLM_API_KEY", "")
-    with pytest.raises(vision.VisionError, match="VLM_API_KEY"):
+    monkeypatch.setattr(vision.config, "LLM_API_KEY", "")
+    with pytest.raises(vision.VisionError, match="LLM_API_KEY"):
         vision.vision_draft(SAMPLES / "order_RX-2001.png", fake_post(TRUTH.model_dump_json()))
-    monkeypatch.setattr(vision.config, "VLM_BASE_URL", "http://localhost:11434/v1")
+    monkeypatch.setattr(vision.config, "LLM_BASE_URL", "http://localhost:11434/v1")
     assert vision.vision_draft(SAMPLES / "order_RX-2001.png", fake_post(TRUTH.model_dump_json())).items == TRUTH.items
 
 
@@ -123,7 +123,7 @@ def test_retries_give_up_with_a_readable_error():
 
 
 def test_a_bad_key_is_not_retried():
-    with pytest.raises(vision.VisionError, match=r"401: This model is busy. \(check VLM_API_KEY"):
+    with pytest.raises(vision.VisionError, match=r"401: This model is busy. \(check LLM_API_KEY"):
         vision.vision_draft(SAMPLES / "order_RX-2001.png", replies(401), sleep=pytest.fail)
 
 

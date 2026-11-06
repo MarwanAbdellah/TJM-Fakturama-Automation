@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from image2cash.extract.ocr import Line, ocr_pil
-from image2cash.ui.core import AutomationError
+from image2cash.ui.core import AutomationError, ManualReview
 
 log = logging.getLogger("image2cash.grid")
 
@@ -249,7 +249,7 @@ def read_stable(rect, header_names, timeout: float = 8, owner=None) -> Grid:
         time.sleep(0.2)
     if last is None:
         raise AutomationError("grid could not be read")
-    return last
+    raise ManualReview(f"list did not stabilize within {timeout} seconds")
 
 
 def grid_below_search(dialog):

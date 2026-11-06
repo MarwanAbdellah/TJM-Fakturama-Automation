@@ -120,7 +120,7 @@ def select_or_create(ctx: Ctx) -> None:
 
     # 2.1-2.3: the existence check is done in the Order's selector, as briefed.
     dialog, icon = S.open_selector(ctx, "Addresses", TITLE)
-    grid = S.search(ctx, dialog, d.company, HEADERS)
+    grid = S.search(ctx, dialog, d.company, HEADERS, auto_accepts=False)
     shot = ctx.shot("debtor_selector", [(icon, "select existing contact")])
     if grid is None:
         # auto-accepted a single filtered row
@@ -150,7 +150,7 @@ def reselect(ctx: Ctx) -> None:
     if len(matches) != 1:
         raise AutomationError(f"after saving, {len(matches)} exact debtors exist (expected 1)")
     dialog, _ = S.open_selector(ctx, "Addresses", TITLE)
-    grid = S.search(ctx, dialog, d.company, HEADERS)
+    grid = S.search(ctx, dialog, d.company, HEADERS, auto_accepts=False)
     if grid is not None:
         S.pick(ctx, dialog, grid, _row_is_target(ctx, matches[0]), "Company")
     ctx.contact_id = matches[0].id
@@ -190,6 +190,9 @@ def verify_order_addresses(ctx: Ctx) -> None:
         text, missing = shown()
         seen[tab] = text
         if missing:
+            ctx.record(
+                "2.4 order addresses", "FAIL", tab=tab, missing=missing, text=text, shot=ctx.shot("order_addresses")
+            )
             raise ManualReview(f"{tab} on the Order lacks {missing}: {text!r}")
     if seen.get("Delivery address") is None and not d.same_delivery:
         ctx.warnings.append("Order shows no separate Delivery address tab; delivery address verified in DB only")
@@ -385,6 +388,40 @@ def _check_saved_addresses(ctx: Ctx, addrs: list[dict]) -> None:
 
 
 # ---------------------------------------------------------------------------
+def _check_new_payment(ctx: Ctx, payment_id: int) -> None:
+    """2.10.3 / 2.10.5: the saved payment has the brief's blank fields.
+
+    The editor's 'Account' field is the Category combo (FK_CATEGORY); the three
+    free texts are the unpaid/deposit/paid notes."""
+    p = ctx.order.payment
+    rows = db.query(
+        'SELECT "NAME", "DESCRIPTION", "FK_CATEGORY", "DISCOUNTVALUE", "DISCOUNTDAYS", "NETDAYS", '
+        '"UNPAIDTEXT", "DEPOSITTEXT", "PAIDTEXT" FROM "FKT_PAYMENT" WHERE "ID" = ?',
+        (payment_id,),
+    )
+    if len(rows) != 1:
+        ctx.record("2.10.3/2.10.5 payment fields", "FAIL", payment=payment_id, rows=len(rows))
+        raise AutomationError(f"saved payment {p.method!r} not found by id {payment_id}")
+    name, description, account, discount, discount_days, net_days, *texts = rows[0]
+    wrong = []
+    if (name or "").strip() != p.method:
+        wrong.append(f"name {name!r}")
+    if (description or "").strip() != p.method:
+        wrong.append(f"description {description!r}")
+    if account is not None:
+        wrong.append(f"account {account!r}")
+    for label, value in (("cash discount", discount), ("discount days", discount_days), ("net days", net_days)):
+        if value not in (None, 0):
+            wrong.append(f"{label} {value!r}")
+    for label, value in zip(("unpaid text", "deposit text", "paid text"), texts):
+        if (value or "").strip():
+            wrong.append(f"{label} {value!r}")
+    if wrong:
+        ctx.record("2.10.3/2.10.5 payment fields", "FAIL", payment=payment_id, wrong=wrong)
+        raise AutomationError(f"payment {p.method!r} saved with {', '.join(wrong)}")
+    ctx.record("2.10.3/2.10.5 payment fields", "ok", payment=payment_id)
+
+
 def ensure_payment_method(ctx: Ctx) -> str:
     """2.10.1-2.10.6. Returns the entry the Debtor's Payment combo shows for it
     (Fakturama lists payment *descriptions* there)."""
@@ -427,6 +464,7 @@ def ensure_payment_method(ctx: Ctx) -> str:
     ui.save()  # 2.10.6
     wait_for(lambda: len(db.payments_named(p.method)) == 1, 10, what="payment saved")
     row = db.payments_named(p.method)[0]
+    _check_new_payment(ctx, row["id"])
     ctx.created.append(f"Payment {p.method}")
     ctx.record("2.10.6 payment created", "ok", id=row["id"], code=row["code"], shot=shot)
     ctx.close_saved_tab()

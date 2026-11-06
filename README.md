@@ -76,13 +76,13 @@ amounts, new references, so they don't collide with the USD bookings.
 | `order_RX-1003.png`, Chicago hospital | **8 lines** (the item table scrolls); new VAT 6.25 %; 8 new products; separate delivery address; UNPAID | Order PO000005 and Invoice INV000006 ($2,035.58). This one was built up over several calibration runs (see "found live" below) and finished with `--resume`. |
 | `order_WEB-2026-0714-A17.png`, the assessment's own image (EUR) | Reference input | Booked earlier as PO000002 / INV000003 in a workspace that has since been reset. The currency guard stops any order whose currency differs from the workspace's ("order is in EUR, Fakturama books in USD" while it booked in USD). The workspace books in EUR now, so this order passes the guard; it has not been re-run since the switch. |
 
-Each run writes these files to `runs/<id>/`:
+Run files are stored in `runs/<id>/`:
 
 | File | Contents |
 |---|---|
-| `run.json` | Every step, the values read back and the DB rows |
+| `run.json` | Every step, the values read back and the DB rows; written after extraction and validation, once driving starts (a rejected source writes none) |
 | `run.log` | Timestamped log of every step and every UI action: clicks, typed fields, combo choices, dialogs, saves, grid reads, timeouts |
-| `output.log` | Raw console output, for crashes before logging starts |
+| `output.log` | Raw console output, for crashes before logging starts; written by the app's runs only, not the CLI |
 | `screenshots/` | Annotated screenshots |
 
 The app shows `run.log` live while a run is going, and expanded when a run
@@ -92,6 +92,41 @@ or Resume with its command, and each exit code.
 ## Setup
 
 **Requirements:** Windows 10/11, Fakturama 2.2.0, Python 3.12, [uv](https://docs.astral.sh/uv/), and Node.js (only to regenerate the diagrams).
+
+> [!WARNING]
+> **New PC? Read this first.** The most common first-time failure is Fakturama's
+> folders, not the code. Fakturama uses **two** different folders, and the tool
+> needs both to belong to a separate **test** setup:
+>
+> | Folder | What it holds | Who sets it |
+> |---|---|---|
+> | **Workspace** (Eclipse `-data`) | Fakturama's settings, including where the working directory is | The tool: `C:\Users\<you>\.fakturama2_test` (or `FAKTURAMA_WORKSPACE` in `.env`) |
+> | **Working directory** | The database and documents | **You**, once, in Fakturama's first-start dialog. Pick a new, empty folder, e.g. `D:\Fakturama_Test_Working` |
+>
+> Opening Fakturama from the Start menu uses its *default* workspace, which is
+> not the test one, so the tool will not see it. Steps for a first run:
+>
+> 1. **Close every Fakturama window.** An open Fakturama holds the database port
+>    (9001), and the tool refuses to start next to it.
+> 2. `uv sync`, then `uv run streamlit run app/streamlit_app.py`.
+> 3. Pick a sample and press **Book this order**. The app starts Fakturama on the
+>    test workspace. On the first start Fakturama asks for a **working directory**.
+>    The dialog can open **behind the browser**, so check the taskbar. Choose a new,
+>    empty folder (never your real Fakturama data). The run then continues by
+>    itself (it waits up to 10 minutes).
+> 4. If the run stops with *"currency shown by Fakturama … is not recognised"* or
+>    *"order is in EUR, Fakturama books in …"*, set **File → Preferences** currency
+>    locale to Germany (`de/DE`) as in step 1 below, then book again.
+>
+> Also needed, because controls are found by their English names and tables are
+> read from screenshots:
+> - **Fakturama in English.** It follows the Windows display language. On a
+>   non-English Windows, add `-nl en` to the start command (a standard Eclipse
+>   option; not tested here).
+> - **Display scaling at 100 %** (Windows Settings → Display). Other scalings are untested.
+>
+> If the app says Fakturama *"is not open"*, the message lists which Fakturama
+> windows it did find and the exact command to start the test one.
 
 1. Use a **copy** of the Fakturama workspace; runs create real records. To book
    in EUR, set the currency locale to Germany (`de/DE`: `1.234,57 €`) in
@@ -143,7 +178,7 @@ uv run image2cash extract samples/order_RX-2001.png
 ```
 **AI fallback** for layouts the parser can't read. It sends the image to an
 AI model, so it is off unless you ask for it (the toggle in the app, `--ai` on
-the CLI). Busy or rate-limited replies are retried 4 times. Any OpenAI-compatible
+the CLI). Busy or rate-limited replies get up to 4 attempts (3 retries). Any OpenAI-compatible
 chat API works; the default is OpenRouter (`nvidia/nemotron-3.5-super-vl`, a vision model) and needs
 a key from openrouter.ai. Copy
 `.env.example` to `.env` and put the key in `LLM_API_KEY`:
@@ -173,7 +208,7 @@ itself: it checks the saved Order against the image, then creates the Invoice.
 uv run image2cash verify RX-2001
 ```
 
-**Tests and hooks:** 116 unit tests, plus ruff and hygiene hooks; pytest also runs on push.
+**Tests and hooks:** 287 unit tests, plus ruff and hygiene hooks; pytest also runs on push.
 ```bash
 uv run pytest -q
 ```
@@ -194,7 +229,7 @@ Regenerate the hand-drawn diagrams:
 cd tools/diagrams && npm install && node make_diagrams.mjs
 ```
 
-**Exit codes:**
+**Exit codes for `image2cash run` (and the app's runs):**
 
 | Code | Meaning |
 |---|---|
@@ -203,6 +238,9 @@ cd tools/diagrams && npm install && node make_diagrams.mjs
 | 2 | Stopped for manual review (the UI is left as it is) |
 | 3 | Source rejected; nothing was touched |
 | 4 | Another run is in progress (one run at a time, enforced by an OS file lock) |
+
+`image2cash extract` returns 0 for a valid source or 3 for a rejected source;
+`image2cash verify` returns 0.
 
 ## How it works (short)
 
@@ -227,7 +265,9 @@ cd tools/diagrams && npm install && node make_diagrams.mjs
 4. **Verify.**
    - Every typed value is read back.
    - After each line, the running `Total Net` must match.
-   - Before saving, the totals must equal the image.
+   - Before saving, the totals must equal the image within the small, documented
+     tolerance in `validate.drift`: 1 cent per line + 0.6 cent per unit, because
+     catalogue prices are stored as rounded gross. Any difference is recorded as a warning.
    - After each Save, the DB row is checked.
    - At the end: the Invoice is linked to the Order; the paid flag, date, value
      and method are right; the Order is unchanged and still open.
@@ -324,7 +364,7 @@ src/image2cash/
   steps/     order.py, debtor.py, product.py, invoice.py, selector.py, context.py
   verify/    db.py (read-only HSQLDB)
   models.py  validate.py  flow.py (state machine, run lock)  cli.py  config.py
-tests/       116 unit tests + recorded OCR fixture
+tests/       287 unit tests + recorded OCR fixture
 tools/       make_sample.py (order renderer), make_unseen.py (4 unseen layouts), diagrams/ (rough.js)
 samples/     pharma orders (JSON spec + PNG), the assessment image, unseen/ (4 layouts + truth)
 docs/        design.md, design_v2.md, design_v3.md, egm_review.md, PLAN_v2.md, diagrams/, screenshots/

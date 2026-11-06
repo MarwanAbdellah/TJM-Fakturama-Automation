@@ -345,13 +345,16 @@ def fill_lines(ctx: Ctx) -> None:
         raise AutomationError(f"item columns not located (have {g.headers})")
     at = locate(views, items)
 
+    scrolled = True  # `walk` left the view on its last page
     for col, field, default in (("Qty.", "qty", Decimal(1)), ("Discount", "discount_pct", Decimal(0))):
         for n, it in enumerate(items, 1):
             value = getattr(it, field)
             if value == default:  # new lines already show Qty 1 and Discount 0
                 continue
             clicks, y = at[n]
-            _view(ctx, pane, clicks)
+            if clicks or scrolled:  # else page 1 is still showing: skip the wheel (it parks the mouse mid-table)
+                _view(ctx, pane, clicks)
+            scrolled = bool(clicks)
             left, right = cols[col]
             ui.focus()
             mouse.double_click(coords=(int((left + right) / 2), int(y)))
@@ -410,8 +413,8 @@ def _numbered(g: G.Grid, bottom: float, top: float = float("-inf"), total: int |
 
 
 def verify_lines(ctx: Ctx) -> None:
-    """Read the whole item table page by page and compare every line's SKU, Qty and
-    Discount with the order. Runs once, before the Order is saved."""
+    """Read the whole item table page by page and compare every line's SKU, Qty,
+    Discount and Price with the order. Runs once, before the Order is saved."""
     items = ctx.order.items
     ctx.back_to_order()
     seen: Rows = {}
@@ -431,6 +434,12 @@ def verify_lines(ctx: Ctx) -> None:
                 unread.append(f"line {n} {col}")
             elif got != want:
                 problems.append(f"line {n} {col} shows {row.get(col)!r}, expected {want}")
+        got = parse_amount(row.get("Price"))
+        want = line_net(it.qty, it.unit_net, it.discount_pct)
+        if got is None:
+            unread.append(f"line {n} Price")
+        elif not close(got, want, [it]):
+            problems.append(f"line {n} Price shows {row.get('Price')!r}, expected {want}")
     if unread:  # OCR could not read the cell; the Total Net check and the DB check after save still cover it
         ctx.warnings.append("final table read could not read: " + ", ".join(unread))
     shot = ctx.shot("item_table")

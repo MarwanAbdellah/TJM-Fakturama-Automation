@@ -36,6 +36,16 @@ def main(argv: list[str] | None = None) -> int:
     v.add_argument("cust_ref")
 
     a = p.parse_args(argv)
+    from image2cash.extract import ExtractionError
+
+    try:
+        return _dispatch(p, a)
+    except ExtractionError as exc:
+        print(f"source rejected: {exc}", file=sys.stderr)
+        return 3
+
+
+def _dispatch(p: argparse.ArgumentParser, a: argparse.Namespace) -> int:
     if a.cmd == "extract":
         from image2cash.extract import extract
         from image2cash.validate import check_order

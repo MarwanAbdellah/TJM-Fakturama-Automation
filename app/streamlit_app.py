@@ -568,6 +568,10 @@ else:
         item["problems"] = problems
 
 st.divider()
+back, mid, fwd = st.columns([1, 8, 1], vertical_alignment="center")
+back.button("◀ Previous", key="checks_back", on_click=step_order, args=(-1,), disabled=len(labels) < 2, width="stretch")
+mid.markdown(f"**{item['name']}** · {item['status']} · order {labels.index(ss.review_pick) + 1} of {len(labels)}")
+fwd.button("Next ▶", key="checks_fwd", on_click=step_order, args=(1,), disabled=len(labels) < 2, width="stretch")
 st.subheader("Checks")
 fk_ok, fk_msg = fakturama_ready()
 fk_closed = not fk_ok and "is not open" in fk_msg  # Book starts it; any other problem needs a human
@@ -592,7 +596,12 @@ def ensure_fakturama() -> bool:
     from image2cash import config
     from image2cash.ui.core import AutomationError, start_fakturama
 
-    first = " First run: choose a working directory in Fakturama's dialog." if config.first_run() else ""
+    first = (
+        " First run: Fakturama asks for a working directory in a dialog that may open behind this "
+        "browser window. Choose a new, empty folder (not your real Fakturama data); the run then continues."
+        if config.first_run()
+        else ""
+    )
     try:
         with st.spinner(f"Starting Fakturama on the test workspace…{first}"):
             start_fakturama()
@@ -666,18 +675,8 @@ progress()
 CODE = {status: code for code, status in STATUS.items()}
 
 
-def page_run(by: int, ran: list[str]) -> None:
-    ss.run_pick = ran[(ran.index(ss.run_pick) + by) % len(ran)]
-
-
-ran = [k for k, it in ss.orders.items() if it.get("run_dir")]
-if ran and not running():
-    if ss.get("run_pick") not in ran:
-        ss.run_pick = ran[-1]  # the latest booking first
-    st.subheader("Runs")
-    back, mid, fwd = st.columns([1, 8, 1], vertical_alignment="center")
-    back.button("◀ Previous", key="run_back", on_click=page_run, args=(-1, ran), disabled=len(ran) < 2, width="stretch")
-    fwd.button("Next ▶", key="run_fwd", on_click=page_run, args=(1, ran), disabled=len(ran) < 2, width="stretch")
-    shown = ss.orders[ss.run_pick]
-    mid.markdown(f"**{shown['name']}** · {shown['status']} · run {ran.index(ss.run_pick) + 1} of {len(ran)}")
-    show_run(Path(shown["run_dir"]), CODE.get(shown["status"], 1), sha=ss.run_pick)
+# The run follows the order picked at the top (one navigator for review, checks and run).
+if item.get("run_dir") and not running():
+    st.subheader("Run")
+    st.markdown(f"**{item['name']}** · {item['status']}")
+    show_run(Path(item["run_dir"]), CODE.get(item["status"], 1), sha=sel)

@@ -13,6 +13,7 @@ Every rectangle used for a click comes from the live UIA tree in this run.
 from __future__ import annotations
 
 import logging
+import os
 import re
 import subprocess
 import time
@@ -31,6 +32,35 @@ def main_title(workdir: Path | None) -> str:
     if not workdir:
         return r"(?!)"
     return r"(?i)Fakturama - " + re.escape(str(workdir).rstrip("\\/")) + r"[\\/]?$"
+
+
+def launched_on(cmdline: str | None, workspace: Path) -> bool:
+    """``cmdline`` starts Fakturama with ``-data <workspace>`` (quoted or not, any case)."""
+    m = re.search(r'-data\s+(?:"([^"]+)"|(\S+))', cmdline or "")
+    norm = lambda p: os.path.normcase(os.path.normpath(str(p)))  # noqa: E731
+    return bool(m) and norm(m[1] or m[2]) == norm(workspace)
+
+
+def current_workdir(windows=None) -> Path | None:
+    """Working directory of the test Fakturama. Normally from its preferences (config.workdir).
+    On a first run Fakturama may not have written them yet after its working-directory dialog,
+    so then it is read from the title of the window whose process was started with
+    ``-data <config.WORKSPACE>``: still only the test workspace, never another instance."""
+    wd = config.workdir()
+    if wd or windows is None:
+        return wd
+    import pythoncom
+    import win32com.client
+
+    pythoncom.CoInitialize()  # WMI from the app's script thread
+    procs = win32com.client.GetObject("winmgmts:").ExecQuery(
+        "SELECT ProcessId, CommandLine FROM Win32_Process WHERE Name = 'Fakturama.exe'"
+    )
+    pids = {p.ProcessId for p in procs if launched_on(p.CommandLine, config.WORKSPACE)}
+    titles = [
+        m[1] for w in windows if w.process_id() in pids and (m := re.fullmatch(r"Fakturama - (.+)", w.window_text()))
+    ]
+    return Path(titles[0]) if len(titles) == 1 else None
 
 
 log = logging.getLogger("image2cash.ui")
@@ -123,14 +153,18 @@ def start_fakturama(timeout: float = 180, first_run_timeout: float = 600) -> int
     return pid
 
 
+def _swt_windows() -> list:
+    from pywinauto import Desktop
+
+    return [w for w in Desktop(backend="win32").windows(visible_only=False) if w.class_name() == "SWT_Window0"]
+
+
 def target_instance() -> int:
     """PID of the Fakturama window for config.workdir(), and only if that same process serves
     the database we read. Two Fakturama instances (test + live) cannot both own port 9001,
     and reading one while driving the other would verify the wrong data."""
-    from pywinauto import Desktop
-
-    windows = [w for w in Desktop(backend="win32").windows(visible_only=False) if w.class_name() == "SWT_Window0"]
-    wd = config.workdir()
+    windows = _swt_windows()
+    wd = current_workdir(windows)
     pids = {w.process_id() for w in windows if re.match(main_title(wd), w.window_text())}
     if not pids:
         exe = config.fakturama_home() / config.EXE if config.fakturama_home() else config.EXE
@@ -166,14 +200,15 @@ class UI:
         from pywinauto.application import Application
 
         pid = target_instance()
+        wd = current_workdir(_swt_windows())
         # Maximize first. A minimized window is invisible to UIA (win32 still sees it), and in a
         # small window the Order's fields lie off-screen, so clicks and typing miss them.
-        w32 = Application(backend="win32").connect(process=pid).window(title_re=main_title(config.workdir()))
+        w32 = Application(backend="win32").connect(process=pid).window(title_re=main_title(wd))
         if not w32.is_maximized():
             w32.maximize()
             time.sleep(1)
         self.uia_app = Application(backend="uia").connect(process=pid)
-        self.main = self.uia_app.window(title_re=main_title(config.workdir())).wrapper_object()
+        self.main = self.uia_app.window(title_re=main_title(wd)).wrapper_object()
         self.w32_app = Application(backend="win32").connect(process=self.main.process_id())
         self.w32 = self.w32_app.window(handle=self.main.handle)
         self._shot = 0
@@ -499,6 +534,28 @@ class UI:
         nav = self.find("Navigation View", "Pane")
         self.click(self.find(name, "Text", root=nav))
         time.sleep(1)
+
+    def show_documents(self, node: str, cust_ref: str) -> None:
+        """Documents view on 'Invoices' or 'Orders', searched for the Cust.Ref. The default
+        'This transaction' node and the debtor node are stale after a save (they keep the last
+        document picked by hand), so screenshots showed nothing or another customer.
+        Evidence only: never fails a verified run."""
+        self.nav("Documents")
+        try:
+            tree = [t for t in self.main.descendants(control_type="TreeItem") if t.element_info.name == node]
+            tree[0].select()
+            time.sleep(0.3)
+            label = self.find("Search:", "Text", timeout=3).rectangle()
+            box = next(
+                e
+                for e in self.main.descendants(control_type="Edit")
+                if abs(e.rectangle().top - label.top) < 12 and e.rectangle().left >= label.right - 5
+            )
+            box.click_input()
+            paste(cust_ref)
+            time.sleep(1)
+        except Exception as exc:  # noqa: BLE001 - a screenshot is not worth stopping a verified run
+            log.debug("documents view: could not show %s for %r: %s", node, cust_ref, exc)
 
     # ---- evidence ----------------------------------------------------------
     def screenshot(self, name: str, boxes: list[tuple[object, str]] | None = None) -> Path | None:

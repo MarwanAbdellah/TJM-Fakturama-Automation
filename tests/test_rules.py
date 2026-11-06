@@ -32,6 +32,28 @@ def test_booked_currency():
     assert booked_currency("0.00") is None
 
 
+@pytest.mark.parametrize("shown", ["0.00", "0.00 ¥"])
+def test_unknown_booked_currency_stops_before_typing(monkeypatch, shown):
+    from types import SimpleNamespace as NS
+
+    calls = []
+    ui = NS(
+        focus=lambda: None,
+        press=lambda name: None,
+        active_editor=lambda: "New Order",
+        editor_pane=lambda: None,
+        labelled=lambda *a, **k: shown,
+        learn_locale=lambda text: None,
+    )
+    monkeypatch.setattr(order, "read", lambda ctrl: ctrl)
+    monkeypatch.setattr(order, "set_date", lambda *a: calls.append("date"))
+    ui.set_text = lambda *a, **k: calls.append("text")
+    with pytest.raises(ManualReview, match="not recognised.*currency cannot be confirmed") as exc:
+        order.open_order(NS(ui=ui, order=NS(currency="EUR")))
+    assert repr(shown) in str(exc.value)
+    assert calls == []
+
+
 class _Ctx:
     def __init__(self, resume):
         self.resume, self.resume_at, self.order_no = resume, None, ""

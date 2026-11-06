@@ -10,3 +10,14 @@ node_modules/
 graphify-out/cache/
 graphify-out/.graphify_*
 .env
+
+# local knowledge graph (graphify); regenerate with /graphify
+graphify-out/
+
+# LaTeX build files (the PDF is kept)
+docs/paper/*.aux
+docs/paper/*.log
+docs/paper/*.out
+docs/paper/*.synctex.gz
+docs/paper/*.fls
+docs/paper/*.fdb_latexmk

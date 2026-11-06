@@ -20,6 +20,10 @@ Fakturama's real GUI with **Microsoft UI Automation** and uses **local OCR**
 (Indra) for the image and for Fakturama's custom-drawn grids. Every step is
 verified through UI read-back and **read-only** queries on Fakturama's HSQLDB.
 
+- **Demo video (76 s):** [demo/Image-to-Cash_demo.mp4](demo/Image-to-Cash_demo.mp4)
+- **Architecture and design rationale (3 pages):** [docs/paper/architecture.pdf](docs/paper/architecture.pdf)
+  (LaTeX source alongside)
+
 The tool runs from a **Streamlit app**:
 1. Upload one or more images or PDFs (each becomes a row in a queue).
 2. See what OCR read, with a box drawn around each field.

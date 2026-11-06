@@ -114,6 +114,11 @@ or Resume with its command, and each exit code.
 >    The dialog can open **behind the browser**, so check the taskbar. Choose a new,
 >    empty folder (never your real Fakturama data). The run then continues by
 >    itself (it waits up to 10 minutes).
+>
+>    **Expect a pause of up to a minute or two before anything moves.** Fakturama
+>    takes about 70 s to start, and the very first OCR call downloads and loads the
+>    OCR models. Nothing is stuck: don't click or press Book again, and keep your
+>    hands off the mouse and keyboard once it starts typing.
 > 4. If the run stops with *"currency shown by Fakturama … is not recognised"* or
 >    *"order is in EUR, Fakturama books in …"*, set **File → Preferences** currency
 >    locale to Germany (`de/DE`) as in step 1 below, then book again.

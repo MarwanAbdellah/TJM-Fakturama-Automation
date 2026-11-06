@@ -39,6 +39,22 @@ class ExitCode:
     BUSY = 4
 
 
+TRIES = 2  # a batch books each order at most this often
+
+
+def batch_step(code: int, tries: int) -> str:
+    """What a batch does after a run ends: 'next' order, 'retry' this one, 'skip' it, or 'pause'.
+    A failure or a review stop is tried again (the user's call: a stop can come from the UI);
+    a rejection cannot change, because the order data is the same."""
+    if code == ExitCode.OK:
+        return "next"
+    if code == ExitCode.BUSY:
+        return "pause"  # another run holds Fakturama: not this order's fault
+    if code in (ExitCode.FAILED, ExitCode.MANUAL_REVIEW) and tries < TRIES:
+        return "retry"
+    return "skip"
+
+
 LOCK = config.RUNS_DIR / ".lock"
 log = logging.getLogger("image2cash")
 

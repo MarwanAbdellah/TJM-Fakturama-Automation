@@ -39,10 +39,22 @@ def extract_draft(path: str | Path, ai: bool = False) -> Extraction:
     from image2cash.extract.vision import ENGINE, VisionError, vision_draft
 
     try:
-        return Extraction(image, vision_draft(image), {}, None, ENGINE)
+        draft = vision_draft(image)
+        if problems := _problems(draft):
+            # Output guard: one more reading that is told what the checks found; the
+            # better of the two (fewer problems) goes to human review either way.
+            try:
+                second = vision_draft(image, feedback=problems)
+                if len(_problems(second)) < len(problems):
+                    draft = second
+            except VisionError:
+                pass  # keep the first reading
+        return Extraction(image, draft, {}, None, ENGINE)
     except VisionError as exc:
         if local.draft is None:
-            local.error = f"{local.error}; AI fallback: {exc}"
+            local.error = (
+                f"the local reader could not read this layout ({local.error}), and the AI fallback failed: {exc}"
+            )
         return local
 
 

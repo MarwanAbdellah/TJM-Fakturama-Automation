@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from decimal import ROUND_HALF_UP, Decimal
 
-from image2cash.models import OrderDraft, PaidStatus
+from image2cash.models import PAYMENT_CODES, OrderDraft, PaidStatus  # noqa: F401 - re-exported
 
 CENT = Decimal("0.01")
 
@@ -71,13 +71,6 @@ _ZIP = re.compile(r"^[0-9A-Z][0-9A-Z \-]{2,9}$")
 _CURRENCY = re.compile(r"^[A-Z]{3}$")
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
-# Brief 2.10.4: payment method name -> Fakturama payment code.
-PAYMENT_CODES = {
-    "Bank Transfer": "Credit transfer",
-    "Credit Card": "Credit card",
-    "SEPA Direct Debit": "SEPA direct debit",
-}
-
 
 def check_order(order: OrderDraft) -> list[str]:
     """Return human-readable problems; an empty list means the draft is usable."""
@@ -138,8 +131,8 @@ def check_order(order: OrderDraft) -> list[str]:
         problems.append("paid status is neither PAID nor UNPAID")
     if not p.method.strip():
         problems.append("payment method is empty")
-    elif p.method not in PAYMENT_CODES:
-        problems.append(f"payment method {p.method!r} has no payment-code mapping (brief 2.10.4)")
+    elif p.payment_code is None:
+        problems.append(f"payment method {p.method!r} has no payment-code mapping: pick its code (brief 2.10.4)")
     return problems
 
 
@@ -178,3 +171,24 @@ def parse_amount(text: str | None) -> Decimal | None:
         return Decimal(cleaned)
     except Exception:
         return None
+
+
+def _zip_core(zip_: str) -> str:
+    """'ME 04101' -> '04101': a leading two-letter state code is not part of the ZIP.
+    Postcodes that start with letters ('S4P 2S7', 'SW1A 1AA') are kept whole."""
+    parts = zip_.split()
+    return " ".join(parts[1:]) if len(parts) > 1 and len(parts[0]) == 2 and parts[0].isalpha() else zip_.strip()
+
+
+def _city_core(city: str) -> str:
+    """'Portland, ME' -> 'Portland'."""
+    return re.sub(r",\s*[A-Za-z]{2}$", "", city.strip())
+
+
+def same_place(zip_a: str, city_a: str, zip_b: str, city_b: str) -> bool:
+    """Same ZIP and City, wherever the state code was written ('ME 04101 Portland' and
+    '04101 Portland, ME' are one address)."""
+    return (
+        _zip_core(zip_a).casefold() == _zip_core(zip_b).casefold()
+        and _city_core(city_a).casefold() == _city_core(city_b).casefold()
+    )

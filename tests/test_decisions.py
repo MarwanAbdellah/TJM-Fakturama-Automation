@@ -192,6 +192,7 @@ def test_product_select_or_create(monkeypatch, db_rows, grid, outcome):
 )
 def test_debtor_select_or_create(monkeypatch, matches, near, grid, target_visible, outcome):
     t = _Trace(monkeypatch, debtor, grid)
+    monkeypatch.setattr(debtor, "_adopt_stored_spelling", lambda ctx: None)
     monkeypatch.setattr(debtor, "_exact", lambda ctx: [NS(id=10 + i) for i in range(matches)])
     monkeypatch.setattr(debtor.db, "query", lambda *a: near)
     monkeypatch.setattr(debtor, "_row_is_target", lambda ctx, contact=None: lambda r: target_visible)
@@ -205,3 +206,31 @@ def test_debtor_select_or_create(monkeypatch, matches, near, grid, target_visibl
         assert t.calls == outcome
         if "create" not in outcome:
             assert ctx.contact_id == 10  # the pick is remembered for the post-save checks
+
+
+@pytest.mark.parametrize(
+    "order, saved, same",
+    [
+        (("04101", "Portland, ME"), ("ME 04101", "Portland"), True),
+        (("04101", "Portland"), ("ME 04101", "Portland"), True),
+        (("S4P 2S7", "Regina"), ("S4P 2S7", "Regina, SK"), True),
+        (("S4P 2S7", "Regina"), ("2S7", "Regina"), False),  # a letter-led postcode is kept whole
+        (("04102", "Portland"), ("ME 04101", "Portland"), False),
+        (("04101", "Bangor"), ("ME 04101", "Portland"), False),
+    ],
+)
+def test_same_place(order, saved, same):
+    from image2cash.validate import same_place
+
+    assert same_place(*order, *saved) is same
+
+
+def test_the_saved_spelling_of_the_same_address_is_used(monkeypatch):
+    o = make()
+    b = o.debtor.billing
+    monkeypatch.setattr(debtor.db, "query", lambda *a: [(f"BE {b.zip}", b.city)])
+    ctx = NS(order=o, warnings=[], record=lambda *a, **k: None)
+    debtor._adopt_stored_spelling(ctx)
+    assert ctx.order.debtor.billing.zip == f"BE {b.zip}" and ctx.warnings
+    if o.debtor.delivery.key() != b.key():
+        assert ctx.order.debtor.delivery == o.debtor.delivery  # another address is left alone

@@ -23,9 +23,9 @@ def booked_currency(display: str) -> str | None:
 def preflight(ctx: Ctx) -> None:
     """Idempotency: never create a second Order/Invoice for the same reference.
 
-    With ``ctx.resume`` a stopped run continues: if exactly one saved Order
-    exists for this reference and no Invoice, the Order is verified against
-    the source and the flow resumes at the Invoice step.
+    A stopped run continues by itself: if exactly one saved Order exists for this
+    reference and no Invoice, the Order is verified against the source (lines,
+    totals, debtor) and the flow resumes at the Invoice step.
     """
     existing = db.documents_with_ref(ctx.order.external_ref)
     if not existing:
@@ -33,7 +33,7 @@ def preflight(ctx: Ctx) -> None:
         return
     orders = [d for d in existing if d["dtype"] == "Order"]
     others = [d for d in existing if d["dtype"] != "Order"]
-    if ctx.resume and len(orders) == 1 and not others:
+    if len(orders) == 1 and not others:
         ctx.order_no = orders[0]["number"]
         ctx.resume_at = "invoice"
         ctx.record("preflight", "resume", order=ctx.order_no)
@@ -41,7 +41,6 @@ def preflight(ctx: Ctx) -> None:
     raise ManualReview(
         f"documents with Cust.Ref. {ctx.order.external_ref!r} already exist: "
         + ", ".join(f"{d['dtype']} {d['number']}" for d in existing)
-        + ("" if ctx.resume else " (use --resume to continue a stopped run)")
     )
 
 
@@ -82,6 +81,7 @@ def open_order(ctx: Ctx) -> None:
     maxi = [b for b in ui._editor_folder().descendants(control_type="Button") if b.element_info.name == "Maximize"]
     if maxi:
         maxi[0].invoke()
+    ctx._order_pane = ui.editor_pane().handle  # this run's own tab; others may share its title
     ctx.record(
         "1 open order",
         "ok",

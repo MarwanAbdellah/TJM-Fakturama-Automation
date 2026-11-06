@@ -132,3 +132,54 @@ def test_vat_percent_is_typed_with_a_dot_whatever_the_price_fields_use():
     assert ui.amount_text(Decimal("6.25"), sep=".") == "6.25"
     assert parse_amount("625%") != Decimal("6.25")  # the 2026-11-05 read-back: caught, so ',' is retried
     assert parse_amount("6.25%") == Decimal("6.25")
+
+
+def test_qty_joined_to_the_sku_is_given_back():
+    from image2cash.steps.product import _unmerge
+    from image2cash.ui.grid import Row
+
+    row = _unmerge(Row(0, {"Pos.": "1", "Item No.": "120.00 NDC-0409-4888", "Discount": "0.00 %"}, {}))
+    assert row.get("Qty.") == "120.00" and row.get("Item No.") == "NDC-0409-4888"
+    kept = _unmerge(Row(0, {"Qty.": "2.00", "Item No.": "CHR-ERG-01"}, {}))
+    assert kept.cells == {"Qty.": "2.00", "Item No.": "CHR-ERG-01"}
+
+
+def test_back_to_order_skips_another_runs_new_order_tab(monkeypatch):
+    from types import SimpleNamespace as NS
+
+    from image2cash.steps.context import Ctx
+    from image2cash.ui import core
+
+    refs = {0: "LTR-0907-B", 1: "LTR-0907-B"}  # a stopped try of the same order left tab 0 open
+    state = {"tab": None}
+
+    def activate(match, nth=None):
+        state["tab"] = nth
+
+    ui = NS(
+        _editor_folder=lambda: NS(element_info=NS(name="Harbor Point")),
+        active_editor=lambda: "*New Order",
+        editor_tabs=lambda: ["Fakturama", "*New Order", "Harbor Point", "*New Order"],
+        activate_editor=activate,
+        editor_pane=lambda: NS(handle=state["tab"]),
+        labelled=lambda *a, **k: "ref field",
+    )
+    monkeypatch.setattr(core, "read", lambda ctrl: refs[state["tab"]])
+    ctx = Ctx(ui=ui, order=NS(external_ref="LTR-0907-B"), run_dir=None)
+    ctx._order_pane = 1  # remembered when this run opened its Order
+    ctx.back_to_order()
+    assert state["tab"] == 1 and ctx._order_pane == 1
+
+
+def test_rows_are_numbered_when_pos_is_misread():
+    from types import SimpleNamespace as NS
+
+    from image2cash.steps.product import _numbered
+    from image2cash.ui.grid import Row
+
+    # the 14:45 run: Pos. read '3' on line 1 (from Qty 3.00) and nothing on line 2
+    rows = [Row(10, {"Pos.": "3", "Item No.": "NDC-0641-6078"}, {}), Row(30, {"Item No.": "OTC-SYR-10ML"}, {})]
+    assert list(_numbered(NS(rows=rows), bottom=100, total=2)) == [1, 2]
+    assert _numbered(NS(rows=rows[:1]), bottom=100, total=2) == {}  # one row of two: cannot tell which
+    paged = [Row(10, {"Pos.": "8", "Item No.": "A"}, {}), Row(30, {"Pos.": "9", "Item No.": "B"}, {})]
+    assert list(_numbered(NS(rows=paged), bottom=100, total=9)) == [8, 9]

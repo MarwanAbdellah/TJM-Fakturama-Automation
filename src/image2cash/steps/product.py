@@ -203,6 +203,7 @@ def ensure_vat(ctx: Ctx, pct: Decimal) -> str:
         raise AutomationError(f"saved VAT differs: {r}")
     ctx.created.append(f"VAT {name}")
     ctx.record(f"3.6 VAT {name}", "created", id=r["id"], value=r["value"], code=r["code"], shot=shot)
+    ctx.close_saved_tab()
     return name
 
 
@@ -244,6 +245,7 @@ def create(ctx: Ctx, item: Item) -> None:
         raise AutomationError(f"saved product {item.sku} differs: {checks} {row}")
     ctx.created.append(f"Product {item.sku}")
     ctx.record(f"3.11 product {item.sku}", "created", id=row["id"], gross=gross, net_stored=row["price"], shot=shot)
+    ctx.close_saved_tab()
 
 
 # ---------------------------------------------------------------------------
@@ -285,7 +287,7 @@ def _walk(ctx: Ctx, pane) -> tuple[list[tuple[int, Rows]], G.Grid]:
         r = _table_rect(ctx, pane)
         g = G.read_grid(r, ITEM_HEADERS, owner=ctx.ui.main)
         first.append(g)
-        return _numbered(g, r.bottom, top=r.top + 28)  # drop half-clipped rows at both edges
+        return _numbered(g, r.bottom, top=r.top + 28, total=len(ctx.order.items))  # no half-clipped rows
 
     _scroll(ctx, pane, TOP)
     return walk(read_page, lambda k: _scroll(ctx, pane, -k), len(ctx.order.items)), first[0]
@@ -382,14 +384,27 @@ def _num(text: str) -> Decimal | None:
     return None if m is None else money(Decimal(m.group()))
 
 
-def _numbered(g: G.Grid, bottom: float, top: float = float("-inf")) -> Rows:
+def _unmerge(row: G.Row) -> G.Row:
+    """OCR can join the right-aligned Qty. with the Item No. beside it
+    ('120.00 NDC-0409-4888' and no Qty.): give the number back to Qty."""
+    m = re.fullmatch(r"(\d+(?:[.,]\d+)?)\s+(\S+)", row.get("Item No.") or "")
+    if m and not row.get("Qty."):
+        row.cells["Qty."], row.cells["Item No."] = m.groups()
+    return row
+
+
+def _numbered(g: G.Grid, bottom: float, top: float = float("-inf"), total: int | None = None) -> Rows:
     """Rows of one read keyed by line number, without rows cut off at either edge.
     Pos. is unreadable on the blue selected row, so rows are numbered from the most
     common (Pos. - index) offset."""
-    rows = [r for r in g.rows if r.get("Item No.") and top < r.y < bottom - 8]
+    rows = [_unmerge(r) for r in g.rows if r.get("Item No.") and top < r.y < bottom - 8]
     offsets = [_row_pos(r) - i for i, r in enumerate(rows) if _row_pos(r) is not None]
+    # A Pos. read that puts a row outside 1..total is a misread ('3.00' bleeding into '1').
+    offsets = [o for o in offsets if o >= 1 and (total is None or o + len(rows) - 1 <= total)]
     if not offsets:
-        return {}
+        # Pos. unreadable or misread: a page with as many rows as the order has lines
+        # shows the whole table, line 1 first.
+        return {i + 1: r for i, r in enumerate(rows)} if total and len(rows) == total else {}
     off = max(set(offsets), key=offsets.count)
     return {i + off: r for i, r in enumerate(rows)}
 

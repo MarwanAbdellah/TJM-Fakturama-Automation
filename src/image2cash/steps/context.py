@@ -32,7 +32,7 @@ class Ctx:
     steps: list[dict] = field(default_factory=list)
     running_net: Decimal = Decimal(0)  # the Order's Total Net after the last added line
     cache: dict = field(default_factory=dict)  # Order-editor controls that do not move while it is open
-    _order_pane: int | None = None  # handle of the editor pane last verified as our Order
+    _order_pane: int | None = None  # handle of this run's own Order editor pane
 
     def record(self, step: str, status: str, **details: Any) -> None:
         entry = {"t": round(time.time(), 2), "step": step, "status": status, **details}
@@ -80,15 +80,43 @@ class Ctx:
                 return
         if not any(self.is_order_tab(t) for t in self.ui.editor_tabs()):
             self.open_saved_order()
-        self.ui.activate_editor(self.is_order_tab)
-        # postcondition: this really is our order (Cust.Ref. reads back)
-        from image2cash.ui.core import AutomationError, read
+        from image2cash.ui.core import AutomationError, read, wait_for
 
-        pane = self.ui.editor_pane()
-        ref = read(self.ui.labelled("Cust.Ref.", "Edit", root=pane))
-        if ref != self.order.external_ref:
-            raise AutomationError(f"returned to an editor with Cust.Ref. {ref!r}")
-        self._order_pane = pane.handle
+        # A stopped run leaves its own '*New Order' open, even one with the same Cust.Ref.
+        # (a retry of the same order). So: this run's own pane, by the handle remembered when
+        # the Order was opened; else (resume) the tab titled with our saved order number.
+        # The Cust.Ref. must read back either way.
+        tabs = [t for t in self.ui.editor_tabs() if self.is_order_tab(t)]
+        seen = []
+        for k in range(len(tabs)):
+            self.ui.activate_editor(self.is_order_tab, nth=k if len(tabs) > 1 else None)
+            pane = self.ui.editor_pane()
+            title = self.ui.active_editor().lstrip("*")
+            if self._order_pane is not None and pane.handle != self._order_pane:
+                if not (self.order_no and title == self.order_no):
+                    seen.append(f"{title} (another run's)")
+                    continue
+            elif self._order_pane is None and len(tabs) > 1 and title != self.order_no:
+                seen.append(f"{title} (cannot tell whose)")
+                continue
+            ref = self.ui.labelled("Cust.Ref.", "Edit", root=pane)
+            try:
+                wait_for(lambda f=ref: read(f) == self.order.external_ref, 1.5)
+            except AutomationError:
+                seen.append(f"{title} with Cust.Ref. {read(ref)!r}")
+                continue
+            self._order_pane = pane.handle
+            return
+        raise AutomationError(f"this run's Order tab is not open; found {seen}")
+
+    def close_saved_tab(self) -> None:
+        """Close the master-data tab just saved and verified. Cosmetic: a failure only warns."""
+        from image2cash.ui.core import AutomationError
+
+        try:
+            self.ui.close_active_editor()
+        except AutomationError as exc:
+            self.warnings.append(f"left a saved tab open: {exc}")
 
     def open_saved_order(self) -> None:
         """Resume path: open the saved Order from Data > Documents > Orders."""

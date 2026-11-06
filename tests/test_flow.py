@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import pytest
 import pywinauto.timings
 
 from image2cash import flow
@@ -35,3 +36,20 @@ def test_rejected_source_is_logged(tmp_path):
     draft.gross_total = draft.gross_total + 1
     assert flow.run(Path("x.png"), tmp_path, draft=draft) == flow.ExitCode.INVALID_SOURCE
     assert "gross total" in (tmp_path / "run.log").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    "code, tries, step",
+    [
+        (flow.ExitCode.OK, 1, "next"),
+        (flow.ExitCode.FAILED, 1, "retry"),
+        (flow.ExitCode.FAILED, 2, "skip"),  # tried twice: move on
+        (flow.ExitCode.MANUAL_REVIEW, 1, "retry"),
+        (flow.ExitCode.MANUAL_REVIEW, 2, "skip"),
+        (flow.ExitCode.INVALID_SOURCE, 1, "skip"),
+        (flow.ExitCode.BUSY, 1, "pause"),
+        (None, 1, "skip"),  # crashed without an exit code we know
+    ],
+)
+def test_batch_step(code, tries, step):
+    assert flow.batch_step(code, tries) == step

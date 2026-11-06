@@ -11,8 +11,9 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 from enum import Enum
+from typing import Literal, get_args
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class PaidStatus(str, Enum):
@@ -49,10 +50,34 @@ class Debtor(BaseModel):
         return self.billing.key() == self.delivery.key()
 
 
+# The entries of Fakturama's payment-code dropdown.
+PaymentCode = Literal["Credit transfer", "Credit card", "SEPA direct debit"]
+PAYMENT_CODE_LABELS: tuple[str, ...] = get_args(PaymentCode)
+
+# Brief 2.10.4: payment method name -> Fakturama payment code.
+PAYMENT_CODES: dict[str, str] = {
+    "Bank Transfer": "Credit transfer",
+    "Credit Card": "Credit card",
+    "SEPA Direct Debit": "SEPA direct debit",
+}
+
+
 class Payment(BaseModel):
-    method: str
+    method: str  # any name; a missing one is created in Fakturama
     status: PaidStatus
     paid_date: date | None = None
+    code: PaymentCode | None = None  # picked in review; None = the brief's mapping of method
+
+    @field_validator("method")
+    @classmethod
+    def _brief_spelling(cls, v: str) -> str:
+        # 'bank transfer' is the brief's 'Bank Transfer', not a second method in Fakturama
+        v = v.strip()
+        return next((m for m in PAYMENT_CODES if m.casefold() == v.casefold()), v)
+
+    @property
+    def payment_code(self) -> str | None:
+        return self.code or PAYMENT_CODES.get(self.method)
 
 
 class Item(BaseModel):

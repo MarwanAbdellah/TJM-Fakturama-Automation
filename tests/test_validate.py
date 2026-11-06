@@ -133,3 +133,9 @@ def test_duplicate_sku():
 )
 def test_parse_amount(text, value):
     assert parse_amount(text) == value
+
+
+def test_any_payment_method_works_once_it_has_a_code():
+    assert Payment(method=" bank transfer", status=PaidStatus.UNPAID).method == "Bank Transfer"
+    p = Payment(method="Cheque", status=PaidStatus.UNPAID, code="Credit transfer")
+    assert check_order(make(payment=p)) == []

@@ -422,19 +422,36 @@ class UI:
     def active_editor(self) -> str:
         return self._editor_folder().element_info.name
 
-    def activate_editor(self, title: str | Callable[[str], bool]) -> str:
+    def activate_editor(self, title: str | Callable[[str], bool], nth: int | None = None) -> str:
+        """Bring an editor tab to the front. ``nth`` picks one of several tabs with a
+        matching title (left to right); several '*New Order' tabs can be open."""
         match = title if callable(title) else (lambda t: t.lstrip("*") == title)
         folder = self._editor_folder()
-        if match(folder.element_info.name):  # already the active tab: clicking it again costs ~1.5 s
+        if nth is None and match(folder.element_info.name):  # already active: a click costs ~1.5 s
             self.focus()  # the click also gave Fakturama the keyboard (Ctrl+W, typing)
             return folder.element_info.name
         log.debug("activate editor (open: %s)", self.editor_tabs())
-        for c in folder.children():
-            if c.element_info.control_type == "TabItem" and match(c.element_info.name):
-                self.click(c)
-                wait_for(lambda: match(self._editor_folder().element_info.name), 5, what=f"editor {title}")
-                return c.element_info.name
+        items = sorted(
+            (c for c in folder.children() if c.element_info.control_type == "TabItem" and match(c.element_info.name)),
+            key=lambda c: c.rectangle().left,
+        )
+        if len(items) > (nth or 0):
+            c = items[nth or 0]
+            self.click(c)
+            wait_for(lambda: match(self._editor_folder().element_info.name), 5, what=f"editor {title}")
+            return c.element_info.name
         raise AutomationError(f"editor tab {title!r} not open; open: {self.editor_tabs()}")
+
+    def close_active_editor(self) -> None:
+        """Close the active editor tab once it is saved. Never closes an unsaved
+        ('*') tab, so typed input is never discarded."""
+        from pywinauto.keyboard import send_keys
+
+        wait_for(lambda: not self.active_editor().startswith("*"), 3, what="editor saved before closing")
+        title, n = self.active_editor(), len(self.editor_tabs())
+        self.focus()
+        send_keys("^w")
+        wait_for(lambda: len(self.editor_tabs()) < n, 5, what=f"editor {title!r} closed")
 
     def view_panel(self, name: str):
         """A non-editor view folder (Documents, Products, VATs, ...) showing ``name``."""

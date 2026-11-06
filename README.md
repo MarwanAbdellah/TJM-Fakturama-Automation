@@ -1,3 +1,17 @@
+[![Python](https://img.shields.io/badge/Python-3.12-blue.svg)](https://www.python.org/)
+[![Fakturama](https://img.shields.io/badge/Fakturama-2.2.0-1F6FB2.svg)](https://www.fakturama.info/)
+[![Windows UI Automation](https://img.shields.io/badge/Windows-UI%20Automation-0078D4.svg)](https://learn.microsoft.com/windows/win32/winauto/entry-uiauto-win32)
+[![pywinauto](https://img.shields.io/badge/pywinauto-0.6.9-3776AB.svg)](https://pywinauto.readthedocs.io/)
+[![Streamlit](https://img.shields.io/badge/Streamlit-1.66-FF4B4B.svg)](https://streamlit.io/)
+[![Pydantic](https://img.shields.io/badge/Pydantic-2.14-E92063.svg)](https://docs.pydantic.dev/)
+[![OCR](https://img.shields.io/badge/OCR-indra--ocr%201.1-6A5ACD.svg)](https://pypi.org/project/indra-ocr/)
+[![pypdfium2](https://img.shields.io/badge/PDF-pypdfium2%205.14-8A2BE2.svg)](https://pypdfium2.readthedocs.io/)
+[![HSQLDB](https://img.shields.io/badge/HSQLDB-JayDeBeApi%201.2-8B4513.svg)](https://github.com/baztian/jaydebeapi)
+[![AI fallback](https://img.shields.io/badge/AI%20fallback-OpenAI--compatible%20%28Gemini%20default%29-4285F4.svg)](https://ai.google.dev/gemini-api/docs/openai)
+[![uv](https://img.shields.io/badge/uv-managed-green.svg)](https://docs.astral.sh/uv/)
+[![pytest](https://img.shields.io/badge/tests-pytest-0A9EDC.svg)](https://docs.pytest.org/)
+[![Ruff](https://img.shields.io/badge/lint%20%26%20format-ruff-E6001A.svg)](https://docs.astral.sh/ruff/)
+
 # Fakturama Image-to-Cash
 
 This tool turns an order image or PDF into a saved, verified **Order** and a linked
@@ -12,7 +26,8 @@ The tool runs from a **Streamlit app**:
 3. Correct anything that is wrong.
 4. Preview what will be created and what will be selected.
 5. Press **Book this order**, or **Book all ready** to book the queue one
-   order at a time.
+   order at a time. A batch tries a stopped order once more, then skips it and
+   moves on; at the end it lists every skipped order and why.
 
 It runs from a CLI too.
 
@@ -109,9 +124,9 @@ After you press a Book button, don't touch the mouse or keyboard until the page 
 ```bash
 uv run image2cash extract samples/order_RX-2001.png
 ```
-**Opt-in AI fallback** for layouts the parser can't read. It sends the image
-to an AI model, so it is off unless you ask for it (`--ai` here, a toggle in the
-app). Any OpenAI-compatible chat API works; the default is Gemini
+**AI fallback** for layouts the parser can't read. It sends the image to an
+AI model: on by default in the app (turn the toggle off to keep images local),
+opt-in on the CLI (`--ai`). Busy or rate-limited replies are retried 4 times. Any OpenAI-compatible chat API works; the default is Gemini
 (`gemini-3.6-flash`) and needs a key from Google AI Studio. Copy
 `.env.example` to `.env` and put the key in `VLM_API_KEY`:
 ```bash
@@ -132,10 +147,9 @@ uv run image2cash run samples/order_RX-2001.png
 ```bash
 uv run image2cash run --draft runs/<id>/draft.json
 ```
-**CLI:** continue after the Order was saved.
-```bash
-uv run image2cash run <image> --resume
-```
+A run whose reference already has one saved Order and no Invoice continues by
+itself: it checks the saved Order against the image, then creates the Invoice.
+(`--resume` still works and does the same.)
 **CLI:** read-only DB view of the documents for a reference.
 ```bash
 uv run image2cash verify RX-2001
@@ -232,9 +246,11 @@ cd tools/diagrams && npm install && node make_diagrams.mjs
   to the cent, totals may differ by 1 cent per line plus 0.6 cent per unit
   (qty 40 can add 16 cents); any difference is reported as a warning.
 - **PDF input uses page 1 only**, rendered at 200 dpi.
-- **The queue lives in the browser tab.** Reloading the page loses it. It
-  continues after "done" or "rejected" and pauses after "failed", "manual
-  review" or "busy" until you press Resume.
+- **The queue lives in the browser tab.** Reloading the page loses it. A batch
+  tries a "failed" or "manual review" order a second time (from its saved Order
+  if it got that far), then skips it; "rejected" is skipped at once. Only "busy"
+  pauses it until you press Resume. A skipped order can leave a half-done editor
+  open in Fakturama while the next order books.
 - **Line-level VAT override** is not automated. An existing product whose VAT
   differs from the image stops for manual review.
 - **Order-level discount and shipping** from an image are not mapped. 0 % and

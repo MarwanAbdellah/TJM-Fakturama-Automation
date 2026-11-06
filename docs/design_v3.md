@@ -76,7 +76,7 @@ documents why section 4 exists.
 
 | Finding | Resolution |
 |---|---|
-| Queue "moves on" after a failure and builds on a half-done Fakturama | **Accepted.** Continue only after exit 0 or 3. Pause after 1 or 2 with "Resume queue" (after a human clears Fakturama). Exit 4 → paused, retry later. |
+| Queue "moves on" after a failure and builds on a half-done Fakturama | **Accepted, later overridden by the user.** A batch now retries exit 1 once, then skips it; exit 2 and 3 are skipped at once and listed with their reason. Only exit 4 pauses. The DB checks still stop any duplicate; a half-done editor may stay open. |
 | Per-order edits live in widget state and are lost when switching orders | **Accepted.** Edits are stored on `orders[sha]["edited"]` every rerun. Queueing freezes a `snapshot`. |
 | The queue driver sits after `st.stop()`; one `proc` slot can be overwritten | **Accepted.** `drive_queue()` runs before any `st.stop()`. `start()` refuses while a run is alive. Resume is hidden while a queue is active. The fragment reruns the app when a run ends. |
 | The speed retry can't repair a wrong-row edit; a mismatch was an AutomationError | **Accepted.** No retry. A totals mismatch is an explicit ManualReview. The row is re-read (with its SKU checked) before a second edit. Cells already at their default are skipped. |

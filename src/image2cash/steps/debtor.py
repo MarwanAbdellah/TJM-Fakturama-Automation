@@ -8,7 +8,6 @@ from image2cash.models import Address
 from image2cash.steps import selector as S
 from image2cash.steps.context import Ctx
 from image2cash.ui.core import AutomationError, ManualReview, _visible, read, wait_for
-from image2cash.validate import PAYMENT_CODES
 from image2cash.verify import db
 
 HEADERS = ["No.", "First Name", "Name", "Company", "ZIP", "City", "address type"]
@@ -25,8 +24,10 @@ def _exact(ctx: Ctx):
 
 
 def chosen_id(ctx: Ctx) -> int | None:
-    """The Debtor this run picked; on --resume (no pick this run) the one exact match."""
+    """The Debtor this run picked; on resume (no pick this run) the one exact match,
+    after the same address respelling the debtor step does."""
     if ctx.contact_id is None:
+        _adopt_stored_spelling(ctx)
         matches = _exact(ctx)
         return matches[0].id if len(matches) == 1 else None
     return ctx.contact_id
@@ -57,7 +58,36 @@ def _row_is_target(ctx: Ctx, contact=None):
     return ok
 
 
+def _adopt_stored_spelling(ctx: Ctx) -> None:
+    """The order's '04101 Portland, ME' is a saved contact's 'ME 04101 Portland': the same
+    address, spelled another way (same company, name and street). Use the saved spelling,
+    so the exact match (brief 2.3) selects that contact and every later check agrees."""
+    from image2cash.validate import same_place
+
+    d = ctx.order.debtor
+    b = d.billing
+    rows = db.query(
+        'SELECT a."ZIP", a."CITY" FROM "FKT_CONTACT" c JOIN "FKT_ADDRESS" a ON a."CONTACT_ADDRESSES" = c."ID" '
+        'WHERE TRIM(c."COMPANY") = ? AND TRIM(c."FIRSTNAME") = ? AND TRIM(c."NAME") = ? AND TRIM(a."STREET") = ? '
+        f"AND {db.live('c')} AND {db.live('a')}",
+        (d.company.strip(), d.first_name.strip(), d.last_name.strip(), b.street.strip()),
+    )
+    stored = {((z or "").strip(), (c or "").strip()) for z, c in rows if same_place(z or "", c or "", b.zip, b.city)}
+    if len(stored) != 1 or stored == {(b.zip, b.city)}:
+        return
+    z, c = stored.pop()
+
+    def respelled(a: Address) -> Address:
+        return a.model_copy(update={"zip": z, "city": c}) if a.key() == b.key() else a
+
+    debtor = d.model_copy(update={"billing": respelled(b), "delivery": respelled(d.delivery)})
+    ctx.order = ctx.order.model_copy(update={"debtor": debtor})
+    ctx.warnings.append(f"address {b.zip} {b.city} taken as the saved contact's {z} {c}")
+    ctx.record("2.3 address spelling", "adopted", order=f"{b.zip} {b.city}", saved=f"{z} {c}")
+
+
 def select_or_create(ctx: Ctx) -> None:
+    _adopt_stored_spelling(ctx)
     d = ctx.order.debtor
     matches = _exact(ctx)
     if len(matches) > 1:
@@ -65,17 +95,27 @@ def select_or_create(ctx: Ctx) -> None:
             f"{len(matches)} debtors match {d.company}/{d.first_name} {d.last_name}/{d.billing.zip} {d.billing.city}"
         )
     if not matches:
-        # Same company and ZIP but another City spelling ('Boston' vs 'Boston, MA') is
-        # probably the same customer: a human decides rather than we create a duplicate.
+        # Probably the same customer, spelled differently: same company and ZIP ('Boston'
+        # vs 'Boston, MA'), or Fakturama's own duplicate rule, same name and street
+        # ('04101' vs 'ME 04101'). A human decides rather than we create a duplicate.
         near = db.query(
-            'SELECT c."CUSTOMERNUMBER", a."CITY" FROM "FKT_CONTACT" c '
+            'SELECT c."CUSTOMERNUMBER", a."STREET", a."ZIP", a."CITY" FROM "FKT_CONTACT" c '
             'JOIN "FKT_ADDRESS" a ON a."CONTACT_ADDRESSES" = c."ID" '
-            f'WHERE TRIM(c."COMPANY") = ? AND TRIM(a."ZIP") = ? AND {db.live("c")} AND {db.live("a")}',
-            (d.company.strip(), d.billing.zip.strip()),
+            'WHERE ((TRIM(c."COMPANY") = ? AND TRIM(a."ZIP") = ?) '
+            'OR (TRIM(c."FIRSTNAME") = ? AND TRIM(c."NAME") = ? AND TRIM(a."STREET") = ?)) '
+            f"AND {db.live('c')} AND {db.live('a')}",
+            (
+                d.company.strip(),
+                d.billing.zip.strip(),
+                d.first_name.strip(),
+                d.last_name.strip(),
+                d.billing.street.strip(),
+            ),
         )
         if near:
             raise ManualReview(
-                f"debtor {d.company!r} with ZIP {d.billing.zip} exists with a different name/city: {near}"
+                f"debtor {d.company!r} looks like an existing contact with other details: {near} "
+                f"(order has {d.billing.street}, {d.billing.zip} {d.billing.city}); fix the order or the contact"
             )
 
     # 2.1-2.3: the existence check is done in the Order's selector, as briefed.
@@ -225,6 +265,23 @@ def create(ctx: Ctx) -> None:
         shots=[shot_main, shot_misc],
     )
     _check_saved_addresses(ctx, addrs)
+    ctx.close_saved_tab()
+
+
+def _no_duplicate_warning(ctx: Ctx) -> None:
+    """Fakturama warns 'Duplicate Contact' (same name and street) when the Street field
+    is left; the modal would swallow the next keystrokes. Dismiss it and stop."""
+    from image2cash.ui.core import AutomationError
+
+    try:
+        dup = ctx.ui.dialog("Duplicate Contact", timeout=1)
+    except AutomationError:
+        return
+    text = " ".join(t.window_text() for t in dup.descendants(control_type="Text")).strip()
+    shot = ctx.shot("duplicate_contact")
+    S.press(dup, "OK")  # only a warning; the unsaved New Debtor stays open for a human
+    ctx.record("2.7 duplicate contact", "REVIEW", fakturama=text, shot=shot)
+    raise ManualReview(f"Fakturama says the contact exists already: {text}")
 
 
 def _fill_address(ctx: Ctx, a: Address, with_contact: bool) -> None:
@@ -233,6 +290,7 @@ def _fill_address(ctx: Ctx, a: Address, with_contact: bool) -> None:
     if a.name and a.name != d.company:
         ui.set_text(ui.labelled("additional name", "Edit", root=ed), a.name)
     ui.set_text(ui.labelled("Street", "Edit", root=ed), a.street)
+    _no_duplicate_warning(ctx)
     if a.extra_lines:  # brief 2.7: only when the source supplies it
         ui.set_text(ui.labelled("Address specification", "Edit", root=ed), " ".join(a.extra_lines))
     z, city = ui.row_controls("ZIP - City", "Edit", root=ed)[:2]
@@ -331,7 +389,7 @@ def ensure_payment_method(ctx: Ctx) -> str:
     """2.10.1-2.10.6. Returns the entry the Debtor's Payment combo shows for it
     (Fakturama lists payment *descriptions* there)."""
     ui, p = ctx.ui, ctx.order.payment
-    code_label = PAYMENT_CODES.get(p.method)
+    code_label = p.payment_code
     if code_label is None:
         raise ManualReview(f"no payment-code mapping for {p.method!r}")
     rows = db.payments_named(p.method)
@@ -371,4 +429,5 @@ def ensure_payment_method(ctx: Ctx) -> str:
     row = db.payments_named(p.method)[0]
     ctx.created.append(f"Payment {p.method}")
     ctx.record("2.10.6 payment created", "ok", id=row["id"], code=row["code"], shot=shot)
+    ctx.close_saved_tab()
     return (row["description"] or row["name"]).strip()

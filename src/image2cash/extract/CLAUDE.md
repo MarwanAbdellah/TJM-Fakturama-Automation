@@ -21,8 +21,9 @@
 - Unseen layouts (`samples/unseen/`) are rejected with `ExtractionError`
   offline, on purpose.
 - `vision.py` is the AI fallback: `extract_draft(path, ai=True)` calls it only
-  when the parser fails or `check_order` finds problems. It is **opt-in only**
-  (`--ai`, the app toggle) because it sends the image off the machine. It is a
+  when the parser fails or `check_order` finds problems. It sends the image off
+  the machine: opt-in on the CLI (`--ai`), on by default in the app (the user's
+  choice; the toggle turns it off). It is a
   plain `requests` call to any OpenAI-compatible `/chat/completions`
   (`config.VLM_BASE_URL`, `VLM_MODEL`, `VLM_API_KEY`, read from `.env`; Gemini
   by default). Its draft has no boxes and `engine="ai-vision"`; never let it skip

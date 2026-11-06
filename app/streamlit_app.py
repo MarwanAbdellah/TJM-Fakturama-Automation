@@ -26,8 +26,9 @@ from pydantic import ValidationError
 from image2cash import config
 from image2cash.extract import extract_draft
 from image2cash.extract.vision import ENGINE
-from image2cash.models import OrderDraft
-from image2cash.validate import PAYMENT_CODES, check_order, vat_name
+from image2cash.flow import batch_step
+from image2cash.models import PAYMENT_CODE_LABELS, PAYMENT_CODES, OrderDraft, Payment
+from image2cash.validate import check_order, vat_name
 
 RUNS = config.RUNS_DIR
 log = logging.getLogger("image2cash.app")
@@ -65,9 +66,9 @@ def section(key: str) -> tuple[str, str]:
 
 
 @st.cache_data(show_spinner="Reading the order...")
-def extract(path: str, ai: bool = False) -> tuple[dict | None, dict, str | None, str, str]:
+def extract(path: str, ai: bool = False, attempt: int = 0) -> tuple[dict | None, dict, str | None, str, str]:
     """-> (draft as JSON dict, field boxes, error, path of the image the boxes refer to, engine).
-    ``ai`` is part of the cache key: switching it on re-reads files the parser could not."""
+    ``ai`` and ``attempt`` are only cache keys: switching AI on, or "Try the AI again", re-reads."""
     r = extract_draft(path, ai)
     if r.draft is None:
         log.warning("could not read %s as an order: %s", path, r.error)
@@ -116,7 +117,16 @@ def review_form(d: dict, k: str) -> dict:
     st.subheader("Payment")
     a, b, cc = st.columns(3)
     methods = sorted(set(PAYMENT_CODES) | {p["method"]})
-    p["method"] = a.selectbox("Method", methods, methods.index(p["method"]), key=k + "pm")
+    p["method"] = a.selectbox("Method", methods, methods.index(p["method"]), accept_new_options=True, key=k + "pm")
+    known = Payment(method=p["method"], status="UNPAID", code=p.get("code")).payment_code
+    p["code"] = a.selectbox(
+        "Payment code",
+        PAYMENT_CODE_LABELS,
+        PAYMENT_CODE_LABELS.index(known) if known else None,
+        placeholder="pick the code for this method",
+        help="Fakturama's payment code; a method Fakturama lacks is created with it",
+        key=k + "pc",
+    )
     statuses = ["PAID", "UNPAID", "OTHER"]
     p["status"] = b.selectbox("Status", statuses, statuses.index(p["status"]), key=k + "ps")
     p["paid_date"] = cc.text_input("Paid on (YYYY-MM-DD)", p.get("paid_date") or "", key=k + "pd") or None
@@ -224,19 +234,20 @@ def start(draft: OrderDraft, resume: bool = False, run_dir: Path | None = None) 
     return True
 
 
-def launch(sha: str) -> None:
+def launch(sha: str, resume: bool = False) -> None:
     """Start the queued order ``sha`` from the snapshot frozen when it was queued."""
     item = st.session_state.orders[sha]
-    if start(OrderDraft.model_validate(item["snapshot"])):
+    item["tries"] = item.get("tries", 0) + 1
+    if start(OrderDraft.model_validate(item["snapshot"]), resume=resume):
         item["status"] = "running"
         item["run_dir"] = str(st.session_state.run_dir)
         st.session_state.current = sha
 
 
 def drive_queue() -> None:
-    """Record the finished run and start the next one. Continues only after 'done' or
-    'rejected' (rejected never touched Fakturama). A failed or review-stopped order
-    leaves Fakturama half-done for a human, so the queue pauses instead."""
+    """Record the finished run and start the next one. A failed run is tried once more
+    (from the saved Order if it got that far); then, like a review stop or a rejection,
+    the order is skipped and listed with its reason. Only a busy lock pauses the queue."""
     ss = st.session_state
     cur = ss.get("current")
     if cur is None or running():
@@ -246,17 +257,21 @@ def drive_queue() -> None:
     item["status"] = STATUS.get(code, f"exit {code}")
     ss.current = None
     log.info("queue: %s -> %s", item["name"], item["status"])
-    if not ss.queue:
+    if not ss.get("batch"):  # a single booking ends here; its run is shown below
         return
-    if code in (0, 3):
+    step, tries = batch_step(code, item["tries"]), item["tries"]
+    if step == "retry":
+        launch(cur, resume=order_saved(read_log(Path(item["run_dir"]))))
+        return
+    if step == "skip":
+        why = stop_reason(read_log(Path(item["run_dir"]))) or "no reason logged"
+        ss.skipped.append((item["name"], f"{item['status']} (tried {tries}x): {why}"))
+    if step == "pause":
+        item["tries"] -= 1  # the lock, not this order, stopped it
+        ss.queue.insert(0, cur)
+        ss.paused = "Queue paused: another image2cash run holds Fakturama. Press Resume queue when it has finished."
+    elif ss.queue:
         launch(ss.queue.pop(0))
-    else:
-        ss.paused = (
-            f"Queue paused: {item['name']} ended as '{item['status']}'. Look at its run below, close any"
-            " half-done Order in Fakturama, then press Resume queue."
-            if code != 4
-            else "Queue paused: another image2cash run holds Fakturama. Press Resume queue when it has finished."
-        )
 
 
 def read_log(run_dir: Path) -> dict | None:
@@ -266,6 +281,17 @@ def read_log(run_dir: Path) -> dict | None:
         return None
 
 
+def stop_reason(log: dict | None) -> str | None:
+    """'<step>: <reason>' of a run that stopped, from its run.json."""
+    steps = log["steps"] if log else []
+    i = next((i for i in range(len(steps) - 1, 0, -1) if steps[i]["step"] == "stopped"), None)
+    return None if i is None else f"{steps[i - 1]['step']}: {steps[i].get('reason', '')}"
+
+
+def order_saved(log: dict | None) -> bool:
+    return bool(log) and any(s["step"] == "4.5 order in DB" and s["status"] == "ok" for s in log["steps"])
+
+
 def tail(path: Path, n: int) -> list[str]:
     try:
         return path.read_text(encoding="utf-8", errors="replace").splitlines()[-n:]
@@ -273,12 +299,14 @@ def tail(path: Path, n: int) -> list[str]:
         return []
 
 
-def show_run(run_dir: Path, code: int | None) -> None:
+def show_run(run_dir: Path, code: int | None, sha: str | None = None) -> None:
     log = read_log(run_dir)
     if code is None:
         st.info("Running in Fakturama. Don't touch the mouse or keyboard.", icon="🖱️")
     else:
         text, kind = EXIT.get(code, (f"exit {code}", "error"))
+        if why := stop_reason(log):  # say why up front; the step table below has the detail
+            text += f"\n\n**Stopped at {why}**"
         getattr(st, kind)(text)
     # run.log has every step and UI action; output.log is the raw console (crashes before logging started).
     lines = tail(run_dir / "run.log", 15 if code is None else 60) or tail(run_dir / "output.log", 60)
@@ -341,33 +369,41 @@ def show_run(run_dir: Path, code: int | None) -> None:
         with st.expander(f"All screenshots ({len(shots)})"):
             for s in shots:
                 st.image(str(s), caption=s.stem)
-        saved = any(s["step"] == "4.5 order in DB" and s["status"] == "ok" for s in steps)
+        saved = order_saved(log)
         if (
             code != 0
             and saved
             and not st.session_state.get("queue")
             and st.button("Resume: create the Invoice for the saved Order")
         ):
-            start(
-                OrderDraft.model_validate(log["order"]),
-                resume=True,
-                run_dir=run_dir.with_name(run_dir.name + "-resume"),
-            )
+            if (
+                start(
+                    OrderDraft.model_validate(log["order"]),
+                    resume=True,
+                    run_dir=run_dir.with_name(run_dir.name + "-resume"),
+                )
+                and sha
+            ):
+                ss_ = st.session_state
+                ss_.orders[sha].update(run_dir=str(ss_.run_dir), status="running")
+                ss_.current, ss_.batch = sha, False  # drive_queue records it like a single booking
             st.rerun()
 
 
 @st.fragment(run_every=1.0)
 def progress() -> None:
+    """The live run. A finished run is shown under Runs, one order at a time."""
     proc = st.session_state.get("proc")
     if proc is None:
         return
     code = proc.poll()
-    if code is not None and not st.session_state.get("logged_exit"):
-        st.session_state.logged_exit = True
-        log.info("run %s finished: exit %s (%s)", st.session_state.run_dir.name, code, EXIT.get(code, ("?", ""))[0])
-        if st.session_state.get("current"):
-            st.rerun(scope="app")  # let drive_queue record it and start the next order
-    show_run(st.session_state.run_dir, code)
+    if code is not None:
+        if not st.session_state.get("logged_exit"):
+            st.session_state.logged_exit = True
+            log.info("run %s finished: exit %s (%s)", st.session_state.run_dir.name, code, EXIT.get(code, ("?", ""))[0])
+            st.rerun(scope="app")  # drive_queue records it and starts the next order; Runs shows it
+        return
+    show_run(st.session_state.run_dir, None)
 
 
 def fakturama_ready() -> tuple[bool, str]:
@@ -394,6 +430,8 @@ ss.setdefault("orders", {})  # sha -> one uploaded order and its review state
 ss.setdefault("queue", [])
 ss.setdefault("current", None)
 ss.setdefault("paused", None)
+ss.setdefault("skipped", [])  # (order, why) of the last batch
+ss.setdefault("attempts", {})  # sha -> AI re-reads asked for (a 503 is cached otherwise)
 
 st.title("💊 Image-to-Cash")
 st.caption(
@@ -419,24 +457,28 @@ uploads = a.file_uploader("Order images or PDFs", type=["png", "jpg", "jpeg", "p
 picks = b.multiselect("...or bundled samples", SAMPLES)
 ai = st.toggle(
     "AI fallback for unknown layouts",
+    value=True,
     help="If the local parser cannot read a file, or its result fails the checks, send the image to "
-    "an AI model (Gemini by default; VLM_BASE_URL / VLM_MODEL in .env) to read it. Off by default: the "
-    "image leaves this machine unless VLM_BASE_URL is a local server. Needs VLM_API_KEY in .env.",
+    "an AI model (Gemini by default; VLM_BASE_URL / VLM_MODEL in .env) to read it. Turn it off to keep "
+    "the image on this machine (it leaves it unless VLM_BASE_URL is a local server). Needs VLM_API_KEY in .env.",
 )
 for name, data in [(f.name, f.getvalue()) for f in uploads or []] + [
     (n, (SAMPLES_DIR / n).read_bytes()) for n in picks
 ]:
     sha = hashlib.sha1(data).hexdigest()[:12]
     known = ss.orders.get(sha)
-    if known and not (ai and not known["ai_tried"] and known["problems"] and known["status"] == "new"):
+    attempt = ss.attempts.get(sha, 0)
+    retry = known and known.get("attempt", 0) != attempt
+    if known and not retry and not (ai and not known["ai_tried"] and known["problems"] and known["status"] == "new"):
         continue
     path = RUNS / "uploads" / f"{sha}{Path(name).suffix.lower()}"
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.exists():
         path.write_bytes(data)
-    raw, boxes, error, image, engine = extract(str(path), ai)
+    raw, boxes, error, image, engine = extract(str(path), ai, attempt)
     item = {"name": name, "image": image, "raw": raw, "boxes": boxes, "error": error, "status": "new", "engine": engine}
     item["ai_tried"] = ai  # turning the toggle on re-reads each failing file once
+    item["attempt"] = attempt
     item["edited"] = json.loads(json.dumps(raw)) if raw else None
     item["problems"] = draft_of(item)[1] if raw else [f"unreadable: {error}"]
     ss.orders[sha] = item
@@ -466,7 +508,20 @@ st.dataframe(
 
 keys = list(ss.orders)
 labels = [f"{n}. {ss.orders[k]['name']}" for n, k in enumerate(keys, 1)]
-sel = keys[labels.index(st.selectbox("Review order", labels))]
+if ss.get("review_pick") not in labels:
+    ss.review_pick = labels[0]
+
+
+def step_order(by: int) -> None:
+    """Previous/Next: move the review (form, checks, run) to the neighbouring order."""
+    ss.review_pick = labels[(labels.index(ss.review_pick) + by) % len(labels)]
+
+
+back, pick, fwd = st.columns([1, 8, 1], vertical_alignment="bottom")
+back.button("◀ Previous", on_click=step_order, args=(-1,), disabled=len(labels) < 2, width="stretch")
+pick.selectbox("Review order", labels, key="review_pick")
+fwd.button("Next ▶", on_click=step_order, args=(1,), disabled=len(labels) < 2, width="stretch")
+sel = keys[labels.index(ss.review_pick)]
 item = ss.orders[sel]
 left, right = st.columns([5, 6])
 with left:
@@ -484,6 +539,11 @@ if item["engine"] == ENGINE:
     )
 if item["error"]:
     right.error(f"Could not read this file as an order: {item['error']}")
+    if not item["ai_tried"]:
+        right.info("Turn on **AI fallback for unknown layouts** above to let the AI model read it.")
+    elif right.button("Try the AI again", key=sel + "retry"):
+        ss.attempts[sel] = item["attempt"] + 1
+        st.rerun()
 else:
     with right:
         # Edits are stored on the item, so switching orders keeps them and the queue books what you saw.
@@ -525,13 +585,31 @@ def ensure_fakturama() -> bool:
         return False
 
 
-def enqueue(keys: list[str]) -> None:
+def enqueue(keys: list[str], batch: bool = False) -> None:
     if not ensure_fakturama():
+        return
+    # a batch skips orders that cannot be booked as they stand, and says why
+    ss.skipped = [
+        (it["name"], f"not booked: {it['problems'][0]}")
+        for k, it in ss.orders.items()
+        if batch and k not in keys and it["status"] == "new" and it["problems"]
+    ]
+    first: dict[str, str] = {}  # one booking per reference: a PDF and its page image are one order
+    for k in list(keys):
+        ref = ss.orders[k]["edited"]["external_ref"]
+        if ref in first:
+            keys.remove(k)
+            ss.skipped.append((ss.orders[k]["name"], f"same order ({ref}) as {first[ref]}; booked once"))
+        else:
+            first[ref] = ss.orders[k]["name"]
+    if not keys:
         return
     for k in keys:
         ss.orders[k]["snapshot"] = ss.orders[k]["edited"]  # freeze what was reviewed
         ss.orders[k]["status"] = "queued"
+        ss.orders[k]["tries"] = 0
     ss.queue = list(keys)
+    ss.batch = batch
     ss.paused = None
     launch(ss.queue.pop(0))
     log.info("queue started: %s", [ss.orders[k]["name"] for k in keys])
@@ -550,7 +628,7 @@ if c1.button(
     enqueue([sel])
     st.rerun()
 if c2.button(f"Book all ready ({len(bookable)})", disabled=busy or not (fk_ok or fk_closed) or not bookable):
-    enqueue(bookable)
+    enqueue(bookable, batch=True)
     st.rerun()
 if ss.paused:
     c3.warning(ss.paused)
@@ -562,4 +640,26 @@ elif ss.queue or ss.current:
     c3.info(f"Booking {ss.orders[ss.current]['name'] if ss.current else '…'}; {len(ss.queue)} waiting.")
 if ss.get("start_error"):
     st.error(ss.start_error)
+if ss.skipped and not (ss.queue or ss.current):
+    st.warning(f"Batch finished; {len(ss.skipped)} order(s) skipped. Fakturama may hold their half-done editors.")
+    st.table(pd.DataFrame(ss.skipped, columns=["Order", "Why it was skipped"]))
 progress()
+
+CODE = {status: code for code, status in STATUS.items()}
+
+
+def page_run(by: int, ran: list[str]) -> None:
+    ss.run_pick = ran[(ran.index(ss.run_pick) + by) % len(ran)]
+
+
+ran = [k for k, it in ss.orders.items() if it.get("run_dir")]
+if ran and not running():
+    if ss.get("run_pick") not in ran:
+        ss.run_pick = ran[-1]  # the latest booking first
+    st.subheader("Runs")
+    back, mid, fwd = st.columns([1, 8, 1], vertical_alignment="center")
+    back.button("◀ Previous", key="run_back", on_click=page_run, args=(-1, ran), disabled=len(ran) < 2, width="stretch")
+    fwd.button("Next ▶", key="run_fwd", on_click=page_run, args=(1, ran), disabled=len(ran) < 2, width="stretch")
+    shown = ss.orders[ss.run_pick]
+    mid.markdown(f"**{shown['name']}** · {shown['status']} · run {ran.index(ss.run_pick) + 1} of {len(ran)}")
+    show_run(Path(shown["run_dir"]), CODE.get(shown["status"], 1), sha=ss.run_pick)

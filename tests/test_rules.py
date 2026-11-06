@@ -46,8 +46,9 @@ class _Ctx:
     [
         ([], False, "ok"),
         ([{"dtype": "Order", "number": "PO7"}], True, "resume"),
-        ([{"dtype": "Order", "number": "PO7"}], False, "review"),
+        ([{"dtype": "Order", "number": "PO7"}], False, "resume"),  # continues by itself
         ([{"dtype": "Order", "number": "PO7"}, {"dtype": "Invoice", "number": "INV7"}], True, "review"),
+        ([{"dtype": "Order", "number": "PO7"}, {"dtype": "Order", "number": "PO8"}], False, "review"),
     ],
 )
 def test_preflight_never_duplicates(monkeypatch, docs, resume, outcome):
@@ -185,6 +186,7 @@ def test_saved_documents_must_name_the_chosen_debtor(monkeypatch):
 
     from image2cash.steps import debtor
 
+    monkeypatch.setattr(debtor, "_adopt_stored_spelling", lambda ctx: None)
     ctx = NS(contact_id=7)
     assert debtor.chosen_id(ctx) == 7
     resumed = NS(contact_id=None)  # --resume: no pick this run, the one exact match counts

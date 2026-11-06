@@ -32,15 +32,18 @@ def _clob(value: Any) -> Any:
 def connect() -> Iterator[Any]:
     import jaydebeapi
 
-    if not os.environ.get("JAVA_HOME") or not Path(os.environ["JAVA_HOME"]).is_dir():
-        jre = config.FAKTURAMA_HOME / "jre"
+    home, jar = config.fakturama_home(), config.hsql_jar()
+    if jar is None:
+        raise RuntimeError("HSQLDB driver not found: set FAKTURAMA_HOME (or HSQL_JAR) in .env")
+    if (not os.environ.get("JAVA_HOME") or not Path(os.environ["JAVA_HOME"]).is_dir()) and home:
+        jre = home / "jre"  # Fakturama ships its own Java
         if jre.is_dir():
             os.environ["JAVA_HOME"] = str(jre)
     conn = jaydebeapi.connect(
         "org.hsqldb.jdbc.JDBCDriver",
         config.HSQL_URL,
         [config.HSQL_USER, config.HSQL_PASSWORD],
-        [str(config.HSQL_JAR)],
+        [str(jar)],
     )
     try:
         conn.jconn.setReadOnly(True)

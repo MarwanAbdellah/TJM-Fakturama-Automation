@@ -23,7 +23,8 @@ from pathlib import Path
 
 from image2cash import config
 
-MAIN_TITLE = "Fakturama - " + re.escape(str(config.WORKDIR)) + "$"
+# No working directory known: match nothing, so target_instance says what to set.
+MAIN_TITLE = "Fakturama - " + re.escape(str(config.WORKDIR)) + "$" if config.WORKDIR else r"(?!)"
 log = logging.getLogger("image2cash.ui")
 
 
@@ -93,10 +94,21 @@ def start_fakturama(timeout: float = 180) -> int:
             f"port {port} is held by another program (pid {owner}), probably another Fakturama. "
             f"Close it, then start again."
         )
-    log.info("starting Fakturama on %s", config.WORKSPACE)
+    home = config.fakturama_home()
+    if home is None:
+        raise AutomationError(
+            "Fakturama.exe was not found (not running, not on PATH, not in the registry or the usual "
+            "install folders). Set FAKTURAMA_HOME in .env to the folder that holds Fakturama.exe."
+        )
+    if config.WORKDIR is None:
+        raise AutomationError(
+            f"The workspace {config.WORKSPACE} has no Fakturama working directory yet. Open it once "
+            f'by hand ("{home / config.EXE}" -data "{config.WORKSPACE}") or set FAKTURAMA_WORKDIR in .env.'
+        )
+    log.info("starting %s on %s", home / config.EXE, config.WORKSPACE)
     subprocess.Popen(
-        [str(config.FAKTURAMA_EXE), "-data", str(config.WORKSPACE)],
-        cwd=str(config.FAKTURAMA_HOME),
+        [str(home / config.EXE), "-data", str(config.WORKSPACE)],
+        cwd=str(home),
         creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
         close_fds=True,
     )
@@ -117,9 +129,10 @@ def target_instance() -> int:
         if w.class_name() == "SWT_Window0" and re.match(MAIN_TITLE, w.window_text())
     }
     if not pids:
+        exe = config.fakturama_home() / config.EXE if config.fakturama_home() else config.EXE
         raise AutomationError(
-            f"Fakturama for {config.WORKDIR} is not open. Start it with: "
-            f'"{config.FAKTURAMA_EXE}" -data "{config.WORKSPACE}"'
+            f"Fakturama for {config.WORKDIR or config.WORKSPACE} is not open. Start it with: "
+            f'"{exe}" -data "{config.WORKSPACE}"'
         )
     port, owner = _db_port_owner()
     if owner not in pids:

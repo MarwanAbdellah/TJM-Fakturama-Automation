@@ -102,8 +102,17 @@ or Resume with its command, and each exit code.
    ```bash
    uv sync
    ```
-3. Paths live in `src/image2cash/config.py`. Override them with the environment
-   variables `FAKTURAMA_HOME`, `FAKTURAMA_WORKDIR`, `HSQL_URL` and `HSQL_JAR`.
+3. Nothing is tied to one PC; the settings are found on each machine
+   (`src/image2cash/config.py`), and any of them can be set in `.env`:
+   - **Fakturama's folder:** from the running `Fakturama.exe`, else where it
+     last ran, else `PATH`, the Windows App Paths registry, or
+     `Program Files` / `AppData\Local\Programs`. An unzipped Fakturama that has
+     never been seen running needs `FAKTURAMA_HOME` in `.env` once.
+   - **Workspace:** `.fakturama2_test` in your user folder, or `FAKTURAMA_WORKSPACE`.
+   - **Working directory and database login:** read from that workspace's
+     Fakturama preferences (open it in Fakturama once), or `FAKTURAMA_WORKDIR`,
+     `HSQL_URL`, `HSQL_USER`, `HSQL_PASSWORD`.
+   - **HSQLDB driver:** the `org.hsqldb.hsqldb_*.jar` Fakturama ships, or `HSQL_JAR`.
    - **Only the configured instance is ever driven.** That is the window titled
      `Fakturama - <FAKTURAMA_WORKDIR>`, and only if that same process owns the
      database port.

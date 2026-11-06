@@ -104,11 +104,19 @@ def wait_for(predicate: Callable[[], object], timeout: float = 10, interval: flo
 
 
 def listener_pid(netstat: str, port: int) -> int | None:
-    """PID listening on ``port`` in `netstat -ano` output."""
+    """PID listening on ``port`` in `netstat -ano` output. Windows translates the State column
+    ('LISTENING', 'ABHÖREN', 'ESCUCHANDO'...), so a listener is told by its foreign address
+    port 0 ('0.0.0.0:0', '[::]:0'), which is the same in every language."""
     for line in netstat.splitlines():
         parts = line.split()
-        if len(parts) >= 5 and parts[0] == "TCP" and parts[1].endswith(f":{port}") and parts[3] == "LISTENING":
-            return int(parts[4])
+        if (
+            len(parts) >= 5
+            and parts[0] == "TCP"
+            and parts[1].endswith(f":{port}")
+            and parts[2].endswith(":0")
+            and parts[-1].isdigit()
+        ):
+            return int(parts[-1])
     return None
 
 
@@ -181,6 +189,11 @@ def target_instance() -> int:
             "to the workspace that Fakturama window uses."
         )
     port, owner = _db_port_owner()
+    if owner is None:
+        raise AutomationError(
+            f"Fakturama for {wd} is open, but nothing serves its database on port {port} yet "
+            "(it may still be starting). Wait a moment and try again."
+        )
     if owner not in pids:
         raise AutomationError(
             f"The database on port {port} belongs to another program (pid {owner}), not to Fakturama for "

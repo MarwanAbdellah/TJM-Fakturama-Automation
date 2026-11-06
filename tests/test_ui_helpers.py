@@ -99,6 +99,14 @@ def test_listener_pid_reads_netstat():
     assert listener_pid(out, 9001) == 176348
     assert listener_pid(out, 59001) == 1234
     assert listener_pid(out, 9002) is None
+    # Windows translates the State column; the foreign address ':0' marks a listener in any language
+    german = """
+  Proto  Lokale Adresse         Remoteadresse          Status           PID
+  TCP    0.0.0.0:9001           0.0.0.0:0              ABHÖREN          4242
+  TCP    127.0.0.1:9001         127.0.0.1:50000        HERGESTELLT      999
+"""
+    assert listener_pid(german, 9001) == 4242
+    assert listener_pid("  TCP    [::]:9001              [::]:0                 LISTENING       77", 9001) == 77
 
 
 @pytest.mark.parametrize(

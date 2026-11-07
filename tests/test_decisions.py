@@ -443,3 +443,16 @@ def test_new_payment_fields_are_checked(monkeypatch, row, ok):
         with pytest.raises(AutomationError):
             debtor._check_new_payment(ctx, 3)
     assert records[-1][0][1] == ("ok" if ok else "FAIL")
+
+
+def test_a_clearly_read_customer_number_picks_the_confirmed_debtor():
+    """A smaller screen: the selector cut off City and OCR missed First Name (Northstar, CUST000001)."""
+    ctx = NS(order=make())
+    contact = NS(number="CUST000001")
+    seen = NS(
+        get=lambda k: {"No.": "CUST000001", "Name": "Klein", "Company": "Northstar Offi...", "ZIP": "10117"}.get(k, "")
+    )
+    assert debtor._row_is_target(ctx, contact)(seen)
+    other = NS(get=lambda k: {"No.": "CUST000002"}.get(k, ""))
+    assert not debtor._row_is_target(ctx, contact)(other)  # another contact's row is never picked
+    assert not debtor._row_is_target(ctx)(seen)  # without a DB-confirmed contact, every field must match

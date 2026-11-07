@@ -45,8 +45,11 @@ def _row_is_target(ctx: Ctx, contact=None):
     d = ctx.order.debtor
 
     def ok(r) -> bool:
-        if contact is not None and contact.number and r.get("No.") and not S.ocr_eq(r.get("No."), contact.number):
-            return False
+        if contact is not None and contact.number and r.get("No."):
+            # The DB already confirmed this contact as the one exact match; its customer number is
+            # unique, so a clearly read number decides. The other cells can be cut off (a narrow
+            # dialog hides City) or missed by OCR. The saved Order's debtor is checked again in 4.5.
+            return S.ocr_eq(r.get("No."), contact.number)
         return (
             S.prefix_match(r.get("Company"), d.company)
             and S.prefix_match(r.get("First Name"), d.first_name)

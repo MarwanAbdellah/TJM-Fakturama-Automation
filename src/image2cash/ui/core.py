@@ -134,6 +134,10 @@ def start_fakturama(timeout: float = 180, first_run_timeout: float = 600) -> int
         return target_instance()
     except AutomationError:
         pass
+    windows = _swt_windows()
+    if any(re.match(main_title(current_workdir(windows)), w.window_text()) for w in windows):
+        # already open (e.g. its database is still starting): wait for it, never start a second one
+        return wait_for(target_instance, timeout, interval=1, what="the open Fakturama to serve its database")
     port, owner = _db_port_owner()
     if owner is not None:
         raise AutomationError(

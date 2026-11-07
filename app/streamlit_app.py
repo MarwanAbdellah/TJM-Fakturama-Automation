@@ -581,15 +581,22 @@ mid.markdown(f"**{item['name']}** · {item['status']} · order {labels.index(ss.
 fwd.button("Next ▶", key="checks_fwd", on_click=step_order, args=(1,), disabled=len(labels) < 2, width="stretch")
 st.subheader("Checks")
 fk_ok, fk_msg = fakturama_ready()
-fk_closed = not fk_ok and "is not open" in fk_msg  # Book starts it; any other problem needs a human
+# Book starts it, or waits for an open one whose database is still starting; any other problem needs a human
+fk_closed = not fk_ok and ("is not open" in fk_msg or "may still be starting" in fk_msg)
 if problems:
     for pr in problems:
         st.error(plain(pr))
 elif draft is not None:
     st.success("All arithmetic and format checks pass.")
-    rows = preview(draft) if fk_ok else [("Fakturama", "closed: Book starts it" if fk_closed else fk_msg)]
+    starting = "may still be starting" in fk_msg
+    waits = "open, still starting: Book waits for it" if starting else "closed: Book starts it"
+    rows = preview(draft) if fk_ok else [("Fakturama", waits if fk_closed else fk_msg)]
     if fk_closed:
-        st.info("Fakturama is closed. Booking starts it on the test workspace first.")
+        st.info(
+            "Fakturama is open but its database is still starting; Book waits for it."
+            if starting
+            else "Fakturama is closed. Booking starts it on the test workspace first."
+        )
     elif not fk_ok:
         st.error(plain(fk_msg))
     st.table(pd.DataFrame(rows, columns=["What", "Fakturama will"]))

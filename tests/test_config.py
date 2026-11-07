@@ -71,3 +71,26 @@ def test_launched_on_matches_only_the_test_workspace():
     assert not launched_on(r"D:\F\Fakturama.exe -data C:\Users\x\.fakturama2", ws)  # the live workspace
     assert not launched_on(r"D:\F\Fakturama.exe", ws)  # default workspace
     assert not launched_on(None, ws)
+
+
+def test_an_installed_fakturama_is_found_whatever_its_folder_name(tmp_path, monkeypatch):
+    """A laptop: Fakturama installed, never seen running, in a folder like 'Fakturama 2'."""
+    install = tmp_path / "Fakturama 2"
+    install.mkdir()
+    (install / "Fakturama.exe").write_text("")
+    monkeypatch.delenv("FAKTURAMA_HOME", raising=False)
+    monkeypatch.setenv("ProgramFiles", str(tmp_path))
+    monkeypatch.delenv("ProgramFiles(x86)", raising=False)
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
+    for name in ("_seen_running", "_last_seen", "_registered_exe"):
+        monkeypatch.setattr(config, name, lambda: None)
+    monkeypatch.setattr(config, "_installed_folders", lambda: [])
+    monkeypatch.setattr(config.shutil, "which", lambda exe: None)
+    assert config.fakturama_home.__wrapped__() == install
+    # the installed-programs list finds it too, wherever it is
+    elsewhere = tmp_path / "Apps" / "Fakt"
+    elsewhere.mkdir(parents=True)
+    (elsewhere / "Fakturama.exe").write_text("")
+    monkeypatch.setenv("ProgramFiles", str(tmp_path / "none"))
+    monkeypatch.setattr(config, "_installed_folders", lambda: [elsewhere])
+    assert config.fakturama_home.__wrapped__() == elsewhere

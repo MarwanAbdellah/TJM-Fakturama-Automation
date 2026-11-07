@@ -59,6 +59,45 @@ def _registered_exe() -> Path | None:
     return None
 
 
+def _installed_folders() -> list[Path]:
+    """Folders of every program named Fakturama in Windows' installed-programs list (the
+    Uninstall keys an installer writes): InstallLocation, else the folder of its icon or
+    uninstaller. Covers any install folder name, e.g. 'C:\\Program Files\\Fakturama 2'."""
+    out: list[Path] = []
+    try:
+        import winreg
+    except ImportError:
+        return out
+    uninstall = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"
+    keys = [
+        (winreg.HKEY_LOCAL_MACHINE, uninstall),
+        (winreg.HKEY_LOCAL_MACHINE, uninstall.replace("SOFTWARE", r"SOFTWARE\WOW6432Node", 1)),
+        (winreg.HKEY_CURRENT_USER, uninstall),
+    ]
+    for hive, path in keys:
+        try:
+            root = winreg.OpenKey(hive, path)
+        except OSError:
+            continue
+        with root:
+            for i in range(winreg.QueryInfoKey(root)[0]):
+                try:
+                    with winreg.OpenKey(root, winreg.EnumKey(root, i)) as k:
+                        if "fakturama" not in str(winreg.QueryValueEx(k, "DisplayName")[0]).lower():
+                            continue
+                        for value in ("InstallLocation", "DisplayIcon", "UninstallString"):
+                            try:
+                                v = str(winreg.QueryValueEx(k, value)[0]).strip().strip('"').split(",")[0]
+                            except OSError:
+                                continue
+                            if v:
+                                p = Path(v.strip('"'))
+                                out.append(p.parent if p.suffix.lower() == ".exe" else p)
+                except OSError:
+                    continue
+    return out
+
+
 def find_home(env: str | None, candidates) -> Path | None:
     """The first folder that holds Fakturama.exe: the setting, else each candidate exe/folder."""
     if env:
@@ -102,11 +141,10 @@ def fakturama_home() -> Path | None:
     """Fakturama's install folder, or None if it cannot be found (then set FAKTURAMA_HOME).
     An unzipped Fakturama is registered nowhere, so where it last ran is remembered."""
     roots = [os.getenv(v) for v in ("ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA")]
-    usual = [
-        Path(r) / sub / name for r in roots if r for sub in ("", "Programs") for name in ("Fakturama2", "Fakturama")
-    ]
-    found = [_seen_running, _last_seen, lambda: shutil.which(EXE), _registered_exe, *usual]
-    return find_home(os.getenv("FAKTURAMA_HOME"), found)
+    # any 'Fakturama*' folder there ('Fakturama2', 'Fakturama 2', 'Fakturama'), newest name last
+    usual = sorted(d for r in roots if r for sub in ("", "Programs") for d in (Path(r) / sub).glob("Fakturama*"))
+    found = [_seen_running, _last_seen, lambda: shutil.which(EXE), _registered_exe, *_installed_folders()]
+    return find_home(os.getenv("FAKTURAMA_HOME"), found + usual[::-1])
 
 
 def hsql_jar() -> Path | None:

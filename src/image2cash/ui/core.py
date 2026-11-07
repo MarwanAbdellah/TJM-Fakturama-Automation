@@ -188,6 +188,13 @@ def target_instance() -> int:
         # The user's rule: with no test Fakturama open, use the one Fakturama that is open, as long
         # as that same process serves the database we verify against. Two open: no guess.
         open_fk = {w.process_id(): w.window_text() for w in windows if re.fullmatch(r"Fakturama - .+", w.window_text())}
+        # 'Fakturama - null': still starting, or its first-run working-directory dialog is open
+        if any(t.endswith(" - null") for t in open_fk.values()):
+            raise AutomationError(
+                "Fakturama is open but has no working directory yet (its title says 'null'): it is still "
+                "starting, or waiting for you to choose a working directory in its dialog. Finish that, "
+                "then book again."
+            )
         port, owner = _db_port_owner()
         if len(open_fk) == 1 and owner in open_fk:
             if _ANNOUNCED.get(owner) != open_fk[owner]:  # the app polls every second: say it once

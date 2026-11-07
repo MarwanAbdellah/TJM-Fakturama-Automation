@@ -15,6 +15,7 @@ import os
 import re
 import subprocess
 import sys
+import warnings
 from datetime import datetime
 from pathlib import Path
 
@@ -29,6 +30,10 @@ from image2cash.extract.vision import ENGINE
 from image2cash.flow import batch_step
 from image2cash.models import PAYMENT_CODE_LABELS, PAYMENT_CODES, OrderDraft, Payment
 from image2cash.validate import check_order, vat_name
+
+# pywinauto and jaydebeapi contain old regex strings that Python 3.12 flags with a SyntaxWarning
+# when it first compiles them; harmless, and not ours to fix. (Runs already pass PYTHONWARNINGS.)
+warnings.filterwarnings("ignore", category=SyntaxWarning)
 
 RUNS = config.RUNS_DIR
 

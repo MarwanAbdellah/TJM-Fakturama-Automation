@@ -74,3 +74,10 @@ def test_the_floating_documents_panel_is_enlarged_by_its_edges():
     (x1, y1), (x2, y2) = bottom
     assert y1 == 512 and x1 == x2 and y2 == int(-8 + 0.85 * 1048) + 1  # bottom edge down to 85 %
     assert core.float_resize((100, 115, 1897, 950), win) == []  # already big: never shrinks
+
+
+def test_a_fakturama_without_a_working_directory_is_never_used(desk):
+    # its title says 'null' while it starts or waits in the first-run dialog (a friend's PC)
+    desk([win("Fakturama - null", 20)], port_owner=20)
+    with pytest.raises(core.AutomationError, match="no working directory yet"):
+        core.target_instance()

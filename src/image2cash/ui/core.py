@@ -23,6 +23,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from image2cash import config
+from image2cash.ui import stop
+from image2cash.ui.stop import UserStop  # noqa: F401 - re-exported for flow and the steps
 
 
 def main_title(workdir: Path | None) -> str:
@@ -92,6 +94,7 @@ def wait_for(predicate: Callable[[], object], timeout: float = 10, interval: flo
     deadline = time.monotonic() + timeout
     last_exc: Exception | None = None
     while time.monotonic() < deadline:
+        stop.check()  # Esc pressed: stop now, not when this wait would end
         try:
             value = predicate()
             if value:
@@ -294,6 +297,7 @@ class UI:
 
     # ---- basic tree access -------------------------------------------------
     def focus(self) -> None:
+        stop.check()  # every click and keystroke focuses first: Esc stops before the next action
         try:
             if self.main.get_show_state() != UIA_MAXIMIZED:  # resized or minimized mid-run
                 log.debug("maximize Fakturama (was resized or minimized)")

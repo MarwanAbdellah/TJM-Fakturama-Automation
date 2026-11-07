@@ -15,7 +15,8 @@ from image2cash.extract import extract
 from image2cash.models import OrderDraft
 from image2cash.steps import debtor, invoice, order, product
 from image2cash.steps.context import Ctx
-from image2cash.ui.core import UI, ManualReview
+from image2cash.ui import stop
+from image2cash.ui.core import UI, ManualReview, UserStop
 from image2cash.validate import check_order
 
 STEPS = [
@@ -37,6 +38,7 @@ class ExitCode:
     MANUAL_REVIEW = 2
     INVALID_SOURCE = 3
     BUSY = 4
+    STOPPED = 5  # the user pressed Esc
 
 
 TRIES = 2  # a batch books each order at most this often
@@ -48,8 +50,8 @@ def batch_step(code: int, tries: int) -> str:
     a rejection cannot change, because the order data is the same."""
     if code == ExitCode.OK:
         return "next"
-    if code == ExitCode.BUSY:
-        return "pause"  # another run holds Fakturama: not this order's fault
+    if code in (ExitCode.BUSY, ExitCode.STOPPED):
+        return "pause"  # another run holds Fakturama, or the user pressed Esc: wait for Resume
     if code in (ExitCode.FAILED, ExitCode.MANUAL_REVIEW) and tries < TRIES:
         return "retry"
     return "skip"
@@ -133,6 +135,7 @@ def _run(image: Path, run_dir: Path, draft: OrderDraft | None, resume: bool, sta
 
 
 def _drive(draft: OrderDraft, run_dir: Path, resume: bool, started: float) -> int:
+    stop.start()  # Esc stops the run at its next action
     ui = UI(evidence_dir=run_dir / "screenshots")
     ctx = Ctx(ui=ui, order=draft, run_dir=run_dir, resume=resume)
     ctx.record("extract", "ok", engine=draft.engine, min_conf=draft.min_confidence, items=len(draft.items))
@@ -150,6 +153,10 @@ def _drive(draft: OrderDraft, run_dir: Path, resume: bool, started: float) -> in
         ctx.record("done", "ok", order=ctx.order_no, invoice=ctx.invoice_no, seconds=round(time.time() - started))
         _summary(ctx)
         return ExitCode.OK
+    except UserStop as exc:
+        ctx.record("stopped", "STOPPED", reason=str(exc), shot=ctx.shot("stopped_by_user"))
+        log.warning("STOPPED by you (Esc). Fakturama is left as-is. Created so far: %s", ctx.created)
+        return ExitCode.STOPPED
     except ManualReview as exc:
         ctx.record("stopped", "REVIEW", reason=str(exc), shot=ctx.shot("manual_review"))
         log.warning("MANUAL REVIEW: %s. Fakturama is left as-is for a human. Created so far: %s", exc, ctx.created)

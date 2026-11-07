@@ -73,6 +73,7 @@ EXIT = {
     0: ("Done and verified", "success"),
     1: ("Automation error", "error"),
     2: ("Stopped for manual review", "warning"),
+    5: ("Stopped by you (Esc)", "warning"),
     3: ("Rejected by validation", "error"),
     4: ("Another run is in progress", "warning"),
 }
@@ -218,7 +219,7 @@ def _preview(draft: OrderDraft, db) -> list[tuple[str, str]]:
 
 
 # ---------------------------------------------------------------- run + progress
-STATUS = {0: "done", 1: "failed", 2: "review", 3: "rejected", 4: "busy"}
+STATUS = {0: "done", 1: "failed", 2: "review", 3: "rejected", 4: "busy", 5: "stopped"}
 
 
 def running() -> bool:
@@ -286,7 +287,16 @@ def drive_queue() -> None:
         run_dir = Path(item["run_dir"])
         why = stop_reason(read_log(run_dir)) or crash_reason(run_dir) or "no reason logged"
         ss.skipped.append((item["name"], f"{item['status']} (tried {tries}x): {why}"))
-    if step == "pause":
+    if step == "pause" and code == 5:  # Esc: this order stays stopped, the rest waits for Resume
+        ss.paused = (
+            None
+            if not ss.queue
+            else (
+                f"Queue paused: you stopped {item['name']} (Esc). Fakturama is left as it was; "
+                "press Resume queue to continue with the next order."
+            )
+        )
+    elif step == "pause":
         item["tries"] -= 1  # the lock, not this order, stopped it
         ss.queue.insert(0, cur)
         ss.paused = "Queue paused: another image2cash run holds Fakturama. Press Resume queue when it has finished."
@@ -329,7 +339,7 @@ def tail(path: Path, n: int) -> list[str]:
 def show_run(run_dir: Path, code: int | None, sha: str | None = None) -> None:
     log = read_log(run_dir)
     if code is None:
-        st.info("Running in Fakturama. Don't touch the mouse or keyboard.", icon="🖱️")
+        st.info("Running in Fakturama. Don't touch the mouse or keyboard. Press Esc to stop.", icon="🖱️")
     else:
         text, kind = EXIT.get(code, (f"exit {code}", "error"))
         if why := stop_reason(log):  # say why up front; the step table below has the detail

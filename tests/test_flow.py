@@ -63,3 +63,28 @@ def test_setup_loads_the_ocr_models(monkeypatch, capsys):
     monkeypatch.setattr(ocr, "_engine", lambda: loaded.append(True))
     assert cli.main(["setup"]) == 0
     assert loaded and "OCR models ready" in capsys.readouterr().out
+
+
+def test_esc_pauses_a_batch():
+    assert flow.batch_step(flow.ExitCode.STOPPED, 1) == "pause"  # never retried or skipped on its own
+
+
+def test_only_a_physical_esc_stops_the_run():
+    from image2cash.ui import stop
+
+    down, up = stop.WM_KEYDOWN, 0x0101
+    assert stop.is_user_stop(stop.VK_ESCAPE, 0, down)
+    assert not stop.is_user_stop(stop.VK_ESCAPE, stop.LLKHF_INJECTED, down)  # the automation's own Esc
+    assert not stop.is_user_stop(stop.VK_ESCAPE, 0, up)
+    assert not stop.is_user_stop(0x0D, 0, down)  # Enter
+
+
+def test_a_pressed_esc_ends_the_current_wait():
+    from image2cash.ui import core, stop
+
+    stop.STOP.set()
+    try:
+        with pytest.raises(stop.UserStop):
+            core.wait_for(lambda: False, timeout=5)  # would wait 5 s; stops at once
+    finally:
+        stop.STOP.clear()

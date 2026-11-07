@@ -485,10 +485,12 @@ ai = st.toggle(
     "an AI model (OpenRouter by default; LLM_BASE_URL / LLM_MODEL in .env) to read it. Off by default: "
     "the image leaves this machine unless LLM_BASE_URL is a local server. Needs LLM_API_KEY in .env.",
 )
+present: set[str] = set()  # orders whose file is selected or uploaded right now
 for name, src, data in [(f.name, f.name, f.getvalue()) for f in uploads or []] + [
     (f"{SAMPLE_LABELS[n]} ({n})" if n in SAMPLE_LABELS else n, n, (SAMPLES_DIR / n).read_bytes()) for n in picks
 ]:
     sha = hashlib.sha1(data).hexdigest()[:12]
+    present.add(sha)
     known = ss.orders.get(sha)
     attempt = ss.attempts.get(sha, 0)
     retry = known and known.get("attempt", 0) != attempt
@@ -505,6 +507,11 @@ for name, src, data in [(f.name, f.name, f.getvalue()) for f in uploads or []] +
     item["edited"] = json.loads(json.dumps(raw)) if raw else None
     item["problems"] = draft_of(item)[1] if raw else [f"unreadable: {error}"]
     ss.orders[sha] = item
+
+# A file removed from the samples or the uploads takes its order (form, checks, run) with it,
+# unless that order is still queued or being booked.
+for gone in [k for k in ss.orders if k not in present and k != ss.current and k not in ss.queue]:
+    del ss.orders[gone]
 
 if not ss.orders:
     progress()

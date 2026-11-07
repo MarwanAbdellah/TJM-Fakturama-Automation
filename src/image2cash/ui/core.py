@@ -125,10 +125,20 @@ def listener_pid(netstat: str, port: int) -> int | None:
     return None
 
 
+def _netstat() -> str:
+    # all protocols, not '-p TCP': that lists IPv4 only, and Fakturama's database can listen on
+    # IPv6 ('[::]:9001') alone, so its listener was never found on some PCs
+    return subprocess.run(["netstat", "-ano"], capture_output=True, text=True, timeout=10).stdout
+
+
 def _db_port_owner() -> tuple[int, int | None]:
     port = int(re.search(r":(\d+)/", config.db_url())[1])
-    out = subprocess.run(["netstat", "-ano", "-p", "TCP"], capture_output=True, text=True, timeout=10).stdout
-    return port, listener_pid(out, port)
+    return port, listener_pid(_netstat(), port)
+
+
+def port_lines(netstat: str, port: int, limit: int = 6) -> list[str]:
+    """The netstat lines that mention ``port``, for an error message that shows what was seen."""
+    return [" ".join(line.split()) for line in netstat.splitlines() if f":{port} " in line][:limit]
 
 
 def start_fakturama(timeout: float = 180, first_run_timeout: float = 600) -> int:
@@ -215,9 +225,11 @@ def target_instance() -> int:
         )
     port, owner = _db_port_owner()
     if owner is None:
+        seen = port_lines(_netstat(), port)
         raise AutomationError(
             f"Fakturama for {wd} is open, but nothing serves its database on port {port} yet "
             "(it may still be starting). Wait a moment and try again."
+            + (f" netstat shows: {seen}" if seen else f" netstat shows nothing on port {port}.")
         )
     if owner not in pids:
         raise AutomationError(

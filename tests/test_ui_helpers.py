@@ -214,3 +214,21 @@ def test_rows_are_numbered_when_pos_is_misread():
     assert _numbered(NS(rows=rows[:1]), bottom=100, total=2) == {}  # one row of two: cannot tell which
     paged = [Row(10, {"Pos.": "8", "Item No.": "A"}, {}), Row(30, {"Pos.": "9", "Item No.": "B"}, {})]
     assert list(_numbered(NS(rows=paged), bottom=100, total=9)) == [8, 9]
+
+
+def test_an_ipv6_only_database_listener_is_found():
+    from image2cash.ui.core import listener_pid, port_lines
+
+    # netstat -ano on a PC where Fakturama's database listens on IPv6 only
+    out = """
+  TCP    0.0.0.0:135            0.0.0.0:0              LISTENING       1100
+  TCP    127.0.0.1:9001         127.0.0.1:51344        TIME_WAIT       0
+  TCP    [::]:9001              [::]:0                 LISTENING       7412
+  UDP    0.0.0.0:9001           *:*                                    888
+"""
+    assert listener_pid(out, 9001) == 7412
+    assert port_lines(out, 9001) == [
+        "TCP 127.0.0.1:9001 127.0.0.1:51344 TIME_WAIT 0",
+        "TCP [::]:9001 [::]:0 LISTENING 7412",
+        "UDP 0.0.0.0:9001 *:* 888",
+    ]

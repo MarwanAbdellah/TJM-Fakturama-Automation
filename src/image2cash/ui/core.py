@@ -190,7 +190,9 @@ def target_instance() -> int:
         open_fk = {w.process_id(): w.window_text() for w in windows if re.fullmatch(r"Fakturama - .+", w.window_text())}
         port, owner = _db_port_owner()
         if len(open_fk) == 1 and owner in open_fk:
-            log.warning("test Fakturama is not open; using the open %r, which serves the database", open_fk[owner])
+            if _ANNOUNCED.get(owner) != open_fk[owner]:  # the app polls every second: say it once
+                _ANNOUNCED[owner] = open_fk[owner]
+                log.warning("test Fakturama is not open; using the open %r, which serves the database", open_fk[owner])
             return owner
         exe = config.fakturama_home() / config.EXE if config.fakturama_home() else config.EXE
         others = sorted({t for w in windows if (t := w.window_text()).startswith("Fakturama")})
@@ -215,9 +217,19 @@ def target_instance() -> int:
     return owner
 
 
+_ANNOUNCED: dict[int, str] = {}  # pid -> window title already logged as the adopted Fakturama
+
 # One worker writes screenshots in order; the interpreter waits for it at exit, so none are lost.
 UIA_MAXIMIZED = 1  # UIA WindowVisualState: 0 normal, 1 maximized, 2 minimized (not Win32's SW_*)
 _SAVER = ThreadPoolExecutor(max_workers=1, thread_name_prefix="shots")
+
+
+def _save_png(img, path: Path) -> None:
+    """Write under a temporary name, then rename: the app shows the newest *.png while a run is
+    going, and must never open a half-written one (PIL UnidentifiedImageError)."""
+    part = path.with_name(path.name + ".part")
+    img.save(part, format="PNG")
+    os.replace(part, path)
 
 
 @dataclass
@@ -606,7 +618,7 @@ class UI:
             draw.text((box[0] + 3, box[1] - 15), label, fill=(255, 255, 255))
         self.evidence_dir.mkdir(parents=True, exist_ok=True)
         path = self.evidence_dir / f"{self._shot:02d}_{name}.png"
-        _SAVER.submit(img.save, path)  # PNG encoding is the slow part; the run need not wait for it
+        _SAVER.submit(_save_png, img, path)  # PNG encoding is the slow part; the run need not wait for it
         return path
 
 

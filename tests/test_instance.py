@@ -46,3 +46,20 @@ def test_an_open_fakturama_that_does_not_serve_the_database_is_not_used(desk):
     desk([win(OTHER, 20)], port_owner=99)  # someone else holds port 9001
     with pytest.raises(core.AutomationError):
         core.target_instance()
+
+
+def test_the_adopted_fakturama_is_announced_once(desk, caplog):
+    core._ANNOUNCED.clear()
+    desk([win(OTHER, 20)], port_owner=20)
+    for _ in range(3):  # the app checks every second
+        core.target_instance()
+    assert sum("using the open" in r.message for r in caplog.records) == 1
+
+
+def test_screenshots_appear_only_when_complete(tmp_path):
+    from PIL import Image
+
+    path = tmp_path / "01_shot.png"
+    core._save_png(Image.new("RGB", (4, 4)), path)
+    assert Image.open(path).size == (4, 4)
+    assert [p.name for p in tmp_path.iterdir()] == ["01_shot.png"]  # no '.part' left behind

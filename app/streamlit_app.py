@@ -515,7 +515,7 @@ uploads = b.file_uploader(
     "...or your own order images or PDFs", type=["png", "jpg", "jpeg", "pdf"], accept_multiple_files=True
 )
 ai = st.toggle(
-    "AI fallback for unknown layouts",
+    "AI fallback for unknown layouts (experimental)",
     help="If the local parser cannot read a file, or its result fails the checks, send the image to "
     "an AI model (OpenRouter by default; LLM_BASE_URL / LLM_MODEL in .env) to read it. Off by default: "
     "the image leaves this machine unless LLM_BASE_URL is a local server. Needs LLM_API_KEY in .env.",

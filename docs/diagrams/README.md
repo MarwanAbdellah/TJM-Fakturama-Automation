@@ -7,13 +7,15 @@ Hand-drawn in the style of [Sketchy](https://github.com/ddkbs/sketchy), generate
 
 The app and the CLI drive the same flow. Fakturama is only written through its UI.
 The database is only read, to decide exact matches and to verify what was saved.
+Esc stops a run before its next action.
 
 ![architecture](architecture.svg)
 
 ## Business flow
 
-This is the Order-first flow from the brief. Database counts decide between
-select, create and manual review.
+This is the Order-first flow from the brief. A reference that is already booked is
+skipped (or, with only its Order saved, finished at the Invoice); database counts
+decide between select, create and manual review.
 
 ![flow](flow.svg)
 

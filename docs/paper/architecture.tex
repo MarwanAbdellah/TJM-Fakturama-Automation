@@ -94,7 +94,7 @@ verifies; every run leaves an evidence trail. \texttt{OrderDraft} is the one con
 
 \begin{description}[leftmargin=0pt,style=nextline]
   \item[Extraction.] A local OCR engine (Indra) feeds a parser that anchors on printed labels rather than positions, so the
-        template survives shifts and rescans. For layouts it cannot read, an \emph{opt-in} vision model (any
+        template survives shifts and rescans. For layouts it cannot read, an \emph{opt-in} and still \emph{experimental} vision model (any
         OpenAI-compatible endpoint; OpenRouter by default) fills the same schema. It is off by default because the image
         leaves the machine; its output gets no special trust: the same checks, a second reading told exactly which checks
         failed, and human review.
@@ -161,11 +161,18 @@ repeated grid OCR, which led to one grid read per line and column-wise filling.
 
 \section{Limits and next steps}
 \begin{itemize}
-  \item Batch mode retries a stopped order once and then moves on; a stopped run leaves its unsaved Order tab for a human.
+  \item Batch mode retries a stopped order once, skips orders already booked, and pauses on Esc; a stopped run leaves
+        its unsaved Order tab for a human.
   \item Only page~1 of a PDF is read; order-level discount and shipping are not mapped; foreign-currency orders stop.
   \item OCR of very long, scrolling item tables is the slowest and least certain step.
-  \item \emph{With three more hours:} a generic dialog watcher, cleanup of abandoned editor tabs, and a structured
-        comparison of the AI-fallback reading against the local parser on the unseen-layout test set.
 \end{itemize}
+
+\paragraph{With three more hours.} The first priority would be to make the AI service more robust. Today it is an
+opt-in fallback for layouts the local parser cannot read: one structured-output call to an OpenAI-compatible model
+(OpenRouter by default), retried on busy replies and asked once more with the problems the checks found. To trust it
+more: run it on every order and compare it field by field with the local OCR, flagging disagreements for review;
+measure it on a labelled set of unseen layouts before relying on it; let it fall back to a local vision model when the
+service is unavailable, so images can stay on the machine; and keep its answers in the run evidence. After that: a
+generic watcher for unexpected dialogs, cleanup of a failed run's records, and running a whole queue in one process.
 
 \end{document}

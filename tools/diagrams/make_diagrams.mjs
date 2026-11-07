@@ -51,17 +51,19 @@ function draw(name, { w, h, title, sub, groups = [], nodes, edges }) {
   for (const e of edges) {
     const A = byId[e.from], Z = byId[e.to];
     const horiz = e.via ? e.via === "h" : A.x + A.w <= Z.x || Z.x + Z.w <= A.x;
-    const [x1, y1] = side(A, horiz ? (Z.x >= A.x + A.w ? "r" : "l") : (Z.y >= A.y + A.h ? "b" : "t"));
-    const [x2, y2] = side(Z, horiz ? (Z.x >= A.x + A.w ? "l" : "r") : (Z.y >= A.y + A.h ? "t" : "b"));
+    // `sides: ["r", "b"]` = an L: out of A's right side, along, then into Z's bottom
+    const [x1, y1] = side(A, e.sides ? e.sides[0] : horiz ? (Z.x >= A.x + A.w ? "r" : "l") : (Z.y >= A.y + A.h ? "b" : "t"));
+    const [x2, y2] = side(Z, e.sides ? e.sides[1] : horiz ? (Z.x >= A.x + A.w ? "l" : "r") : (Z.y >= A.y + A.h ? "t" : "b"));
     const m = e.at ?? (horiz ? (x1 + x2) / 2 : (y1 + y2) / 2); // `at` = elbow lane, to keep parallel edges apart
-    const pts = horiz ? [[x1, y1], [m, y1], [m, y2], [x2, y2]] : [[x1, y1], [x1, m], [x2, m], [x2, y2]];
+    const pts = e.sides ? [[x1, y1], [x2, y1], [x2, y1], [x2, y2]]
+      : horiz ? [[x1, y1], [m, y1], [m, y2], [x2, y2]] : [[x1, y1], [x1, m], [x2, m], [x2, y2]];
     const o = { stroke: INK, strokeWidth: 1.6, roughness: 0.5, ...(e.dashed ? { strokeLineDash: [7, 6] } : {}) };
     for (let i = 0; i < 3; i++) if (pts[i][0] !== pts[i + 1][0] || pts[i][1] !== pts[i + 1][1]) out.push(paths(gen.line(...pts[i], ...pts[i + 1], o)));
     const [px, py] = pts[2], ang = Math.atan2(y2 - py, x2 - px);
     out.push(paths(gen.linearPath([[x2 - 11 * Math.cos(ang - 0.45), y2 - 11 * Math.sin(ang - 0.45)], [x2, y2],
       [x2 - 11 * Math.cos(ang + 0.45), y2 - 11 * Math.sin(ang + 0.45)]], { stroke: INK, strokeWidth: 1.6, roughness: 0.5 })));
     if (e.label) {
-      const [lx, ly] = horiz ? [m, (y1 + y2) / 2] : [(x1 + x2) / 2, m];
+      const [lx, ly] = e.sides ? [(x1 + x2) / 2, y1] : horiz ? [m, (y1 + y2) / 2] : [(x1 + x2) / 2, m];
       const cw = e.label.length * 7 + 14;
       out.push(`<rect x="${lx - cw / 2}" y="${ly - 11}" width="${cw}" height="22" rx="4" fill="${PAPER}"/>`);
       text(lx, ly, e.label, { size: 13, color: "#3d3b35" });
@@ -78,13 +80,14 @@ function draw(name, { w, h, title, sub, groups = [], nodes, edges }) {
 draw("architecture.svg", {
   w: 1400, h: 600, title: "How image2cash is built", sub: "One flow, two front doors; Fakturama is written through its UI and only read through its database",
   groups: [
-    { x: 30, y: 120, w: 230, h: 300, t: "Front doors" },
+    { x: 30, y: 120, w: 230, h: 420, t: "Front doors" },
     { x: 300, y: 120, w: 720, h: 440, t: "image2cash" },
     { x: 1070, y: 170, w: 300, h: 360, t: "Fakturama 2.2.0" },
   ],
   nodes: [
     { id: "app", x: 55, y: 170, w: 180, h: 70, t: "Streamlit app", s: "upload · review · live log" },
     { id: "cli", x: 55, y: 310, w: 180, h: 70, t: "CLI", s: "run · --draft · --resume" },
+    { id: "esc", x: 55, y: 440, w: 180, h: 70, t: "Esc key", s: "stops the run · queue pauses" },
     { id: "ext", x: 330, y: 170, w: 190, h: 70, t: "extract", s: "local OCR + layout" },
     { id: "val", x: 330, y: 310, w: 190, h: 70, t: "validate", s: "lines · totals · formats" },
     { id: "flow", x: 580, y: 300, w: 190, h: 90, t: "flow", s: ["order → debtor → lines", "→ save → invoice"], hi: true },
@@ -100,36 +103,44 @@ draw("architecture.svg", {
     { from: "flow", to: "runs", label: "evidence" }, { from: "flow", to: "ui", label: "acts" },
     { from: "flow", to: "db", via: "h" }, { from: "ui", to: "fk", label: "mouse · keys" },
     { from: "db", to: "hs", label: "SELECT only", dashed: true }, { from: "fk", to: "hs", label: "saves" },
+    { from: "esc", to: "flow", label: "stop", dashed: true, sides: ["r", "b"] },
   ],
 });
 
 // 2. Order flow ------------------------------------------------------------------
 draw("flow.svg", {
-  w: 1660, h: 620, title: "From order image to paid invoice", sub: "The Order-first flow from the brief: a database count decides select, create or stop",
+  w: 1820, h: 640, title: "From order image to paid invoice", sub: "The Order-first flow from the brief: a database count decides select, create or stop",
   groups: [
-    { x: 30, y: 130, w: 470, h: 150, t: "Read" },
-    { x: 540, y: 130, w: 1090, h: 150, t: "Order" },
-    { x: 540, y: 330, w: 680, h: 240, t: "Master data" },
-    { x: 1260, y: 330, w: 370, h: 240, t: "Invoice" },
+    { x: 30, y: 130, w: 680, h: 150, t: "Read and check" },
+    { x: 730, y: 130, w: 1060, h: 150, t: "Order" },
+    { x: 30, y: 330, w: 380, h: 180, t: "Any time" },
+    { x: 430, y: 330, w: 280, h: 180, t: "Before typing" },
+    { x: 730, y: 330, w: 680, h: 260, t: "Master data" },
+    { x: 1430, y: 330, w: 360, h: 260, t: "Invoice" },
   ],
   nodes: [
-    { id: "img", x: 55, y: 170, w: 170, h: 70, t: "order image", s: "PNG / JPG" },
-    { id: "chk", x: 295, y: 170, w: 180, h: 70, t: "extract + check", s: "reject before UI" },
-    { id: "hdr", x: 565, y: 170, w: 190, h: 70, t: "New Order", s: "date · Cust.Ref. · Net" },
-    { id: "deb", x: 815, y: 170, w: 190, h: 70, t: "Debtor", s: "DB: exact match?", hi: true },
-    { id: "sku", x: 1065, y: 170, w: 190, h: 70, t: "Each line", s: "DB: exact SKU?", hi: true },
-    { id: "line", x: 1315, y: 170, w: 210, h: 70, t: "Qty · U.Price · Disc.", s: "running total checked" },
-    { id: "new", x: 565, y: 400, w: 200, h: 80, t: "0 → create", s: ["payment · debtor · roles", "VAT · product"] },
-    { id: "rev", x: 965, y: 400, w: 200, h: 80, t: "2+ → manual review", s: "run stops, UI left as is" },
-    { id: "save", x: 1285, y: 370, w: 140, h: 70, t: "Save Order", s: "totals = image" },
-    { id: "inv", x: 1285, y: 475, w: 140, h: 70, t: "Invoice", s: "paid · date · value" },
-    { id: "ver", x: 1465, y: 425, w: 140, h: 70, t: "verify", s: "link · paid · Order" },
+    { id: "img", x: 55, y: 170, w: 170, h: 70, t: "order image", s: "PNG / JPG / PDF" },
+    { id: "chk", x: 265, y: 170, w: 180, h: 70, t: "extract + check", s: "reject before UI" },
+    { id: "pre", x: 485, y: 170, w: 200, h: 70, t: "Booked already?", s: "DB: Cust.Ref.", hi: true },
+    { id: "hdr", x: 755, y: 170, w: 210, h: 70, t: "New Order", s: ["closes finished tabs", "date · Cust.Ref. · Net"] },
+    { id: "deb", x: 1015, y: 170, w: 190, h: 70, t: "Debtor", s: "DB: exact match?", hi: true },
+    { id: "sku", x: 1265, y: 170, w: 190, h: 70, t: "Each line", s: "DB: exact SKU?", hi: true },
+    { id: "line", x: 1515, y: 170, w: 250, h: 70, t: "Qty · U.Price · Disc.", s: "running total checked" },
+    { id: "esc", x: 55, y: 385, w: 330, h: 90, t: "Esc pressed", s: ["stops before the next click or key", "Fakturama left as is · queue pauses"] },
+    { id: "skip", x: 455, y: 385, w: 230, h: 90, t: "Order + Invoice", s: ["→ skip (batch moves on)", "Order only → make the Invoice"] },
+    { id: "new", x: 755, y: 410, w: 210, h: 80, t: "0 → create", s: ["payment · debtor · roles", "VAT · product"] },
+    { id: "rev", x: 1180, y: 410, w: 210, h: 80, t: "2+ → manual review", s: "run stops, UI left as is" },
+    { id: "save", x: 1455, y: 375, w: 150, h: 70, t: "Save Order", s: "totals = image" },
+    { id: "inv", x: 1455, y: 490, w: 150, h: 70, t: "Invoice", s: "paid · date · value" },
+    { id: "ver", x: 1625, y: 430, w: 150, h: 80, t: "verify", s: ["DB: link · paid", "Documents list"] },
   ],
   edges: [
-    { from: "img", to: "chk" }, { from: "chk", to: "hdr" }, { from: "hdr", to: "deb" }, { from: "deb", to: "sku", label: "1 → select" },
-    { from: "sku", to: "line", label: "1 → select" }, { from: "deb", to: "new", label: "0", via: "v", at: 298 }, { from: "sku", to: "new", label: "0", via: "v", at: 316 },
-    { from: "sku", to: "rev", label: "2+", dashed: true, via: "v", at: 360 }, { from: "line", to: "save", via: "v" }, { from: "save", to: "inv", via: "v" },
-    { from: "inv", to: "ver" },
+    { from: "img", to: "chk" }, { from: "chk", to: "pre" }, { from: "pre", to: "hdr", label: "new" },
+    { from: "pre", to: "skip", label: "booked", via: "v" },
+    { from: "hdr", to: "deb" }, { from: "deb", to: "sku", label: "1 → select" }, { from: "sku", to: "line", label: "1 → select" },
+    { from: "deb", to: "new", label: "0", via: "v", at: 298 }, { from: "sku", to: "new", label: "0", via: "v", at: 316 },
+    { from: "sku", to: "rev", label: "2+", dashed: true, via: "v", at: 360 },
+    { from: "line", to: "save", via: "v" }, { from: "save", to: "inv", via: "v" }, { from: "inv", to: "ver" },
   ],
 });
 
@@ -169,7 +180,7 @@ draw("setup.svg", {
     { id: "ge", x: 1080, y: 360, w: 360, h: 85, t: ".env (optional)", s: ["copy .env.example → .env", "LLM_API_KEY only for AI fallback"] },
     { id: "ra", x: 60, y: 560, w: 300, h: 85, t: "Start the app", s: ["uv run streamlit run app/", "streamlit_app.py → localhost:8501"] },
     { id: "rs", x: 400, y: 560, w: 300, h: 85, t: "Pick an order", s: ["Home Test Example is preselected", "or upload your own"] },
-    { id: "rb", x: 740, y: 560, w: 300, h: 85, t: "Book this order", s: ["hands off mouse and keyboard", "while it types"], hi: true },
+    { id: "rb", x: 740, y: 560, w: 300, h: 85, t: "Book this order", s: ["hands off mouse and keyboard", "Esc stops it"], hi: true },
     { id: "rd", x: 1080, y: 560, w: 360, h: 85, t: "Done and verified", s: ["Order + linked Invoice", "checked in Fakturama's database"] },
   ],
   edges: [

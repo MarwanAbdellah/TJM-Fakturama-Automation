@@ -222,8 +222,12 @@ app) and annotated `screenshots/`. The app keeps its own log in `runs/app.log`.
    `run.json` and the DB state; a `--cleanup` that removes a failed run's records.
 2. **Batch regression.** A few dozen synthetic orders (ambiguous debtors, VAT
    conflicts, long orders) run nightly against a workspace restored from a baseline.
-3. **Speed.** Run a whole queue in one process instead of one per order.
-4. More in the [paper](docs/paper/architecture.pdf).
+3. **Reproducible environment.** A Docker image for everything that needs no screen
+   (OCR, parsing, checks, tests, with the OCR models baked in), plus a scripted
+   Windows VM or Windows Sandbox for full runs: UI Automation needs a real Windows
+   desktop, which a container does not have.
+4. **Speed.** Run a whole queue in one process instead of one per order.
+5. More in the [paper](docs/paper/architecture.pdf).
 
 ## Repository layout
 

@@ -599,7 +599,9 @@ class UI:
                 break
             title = saved[0]
             try:
-                self.activate_editor(lambda t, title=title: t == title)
+                # nth=0 always clicks the tab, even when it is already in front: Ctrl+W acts on the
+                # part with keyboard focus, and the last run left that in the Documents panel.
+                self.activate_editor(lambda t, title=title: t == title, nth=0)
                 self.close_active_editor()
             except AutomationError as exc:
                 log.debug("could not close editor %r: %s", title, exc)

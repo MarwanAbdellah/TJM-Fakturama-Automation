@@ -88,6 +88,7 @@ def test_only_saved_editor_tabs_are_closed_before_a_new_order():
     state = {"active": None}
 
     def activate(match, nth=None):
+        assert nth == 0  # always a real click: Ctrl+W goes to the part with keyboard focus
         state["active"] = next(t for t in tabs if match(t))
 
     def close():

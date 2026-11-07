@@ -47,6 +47,10 @@ def preflight(ctx: Ctx) -> None:
 def open_order(ctx: Ctx) -> None:
     ui, o = ctx.ui, ctx.order
     ui.focus()
+    # A finished run leaves its Order and Invoice open for checking; close those saved tabs now.
+    # Unsaved tabs stay (never discard typed input).
+    if closed := ui.close_saved_editors():
+        ctx.record("1 close finished tabs", "ok", closed=closed)
     ui.press("Create: New Order")  # brief 1.3
     wait_for(lambda: ui.active_editor().lstrip("*") == "New Order", 10, what="New Order editor")
     ed = ui.editor_pane()

@@ -81,3 +81,20 @@ def test_a_fakturama_without_a_working_directory_is_never_used(desk):
     desk([win("Fakturama - null", 20)], port_owner=20)
     with pytest.raises(core.AutomationError, match="no working directory yet"):
         core.target_instance()
+
+
+def test_only_saved_editor_tabs_are_closed_before_a_new_order():
+    tabs = ["Fakturama", "PO000041", "*New Order", "INV000040", "Lakeshore General Hospital"]
+    state = {"active": None}
+
+    def activate(match, nth=None):
+        state["active"] = next(t for t in tabs if match(t))
+
+    def close():
+        assert not state["active"].startswith("*")  # never an unsaved tab
+        tabs.remove(state["active"])
+
+    fake = NS(editor_tabs=lambda: list(tabs), activate_editor=activate, close_active_editor=close)
+    closed = core.UI.close_saved_editors(fake)
+    assert closed == ["PO000041", "INV000040", "Lakeshore General Hospital"]
+    assert tabs == ["Fakturama", "*New Order"]  # the start page and the unsaved tab stay

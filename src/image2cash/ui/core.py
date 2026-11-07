@@ -587,6 +587,26 @@ class UI:
         send_keys("^w")
         wait_for(lambda: len(self.editor_tabs()) < n, 5, what=f"editor {title!r} closed")
 
+    def close_saved_editors(self) -> list[str]:
+        """Before a new Order: close every saved editor tab (no '*'), e.g. the Order and Invoice
+        a finished run left open, so only the new Order's tab is worked in. Unsaved tabs (a
+        stopped run's '*New Order', or a user's own typing) are left alone, and the 'Fakturama'
+        start page stays. Best effort: returns the titles it closed."""
+        closed: list[str] = []
+        for _ in range(50):  # bounded: a tab that will not close must not loop forever
+            saved = [t for t in self.editor_tabs() if not t.startswith("*") and t != "Fakturama"]
+            if not saved:
+                break
+            title = saved[0]
+            try:
+                self.activate_editor(lambda t, title=title: t == title)
+                self.close_active_editor()
+            except AutomationError as exc:
+                log.debug("could not close editor %r: %s", title, exc)
+                break
+            closed.append(title)
+        return closed
+
     def view_panel(self, name: str):
         """A non-editor view folder (Documents, Products, VATs, ...) showing ``name``."""
         editor = self._editor_folder()

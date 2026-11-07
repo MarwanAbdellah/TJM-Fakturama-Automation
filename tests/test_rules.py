@@ -39,6 +39,7 @@ def test_unknown_booked_currency_stops_before_typing(monkeypatch, shown):
     calls = []
     ui = NS(
         focus=lambda: None,
+        close_saved_editors=lambda: [],
         press=lambda name: None,
         active_editor=lambda: "New Order",
         editor_pane=lambda: None,

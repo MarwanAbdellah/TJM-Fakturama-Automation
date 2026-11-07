@@ -1,0 +1,48 @@
+"""Which open Fakturama a run drives (windows and the database port are stubbed)."""
+
+from pathlib import Path
+from types import SimpleNamespace as NS
+
+import pytest
+
+from image2cash.ui import core
+
+TEST = "Fakturama - " + "D:" + "\\" + "Fakturama_Test_Working"
+OTHER = "Fakturama - " + "F:" + "\\" + "test"
+
+
+def win(title, pid):
+    return NS(window_text=lambda: title, process_id=lambda: pid, class_name=lambda: "SWT_Window0")
+
+
+@pytest.fixture
+def desk(monkeypatch):
+    def setup(windows, port_owner):
+        monkeypatch.setattr(core, "_swt_windows", lambda: windows)
+        monkeypatch.setattr(core, "current_workdir", lambda w=None: Path("D:/Fakturama_Test_Working"))
+        monkeypatch.setattr(core, "_db_port_owner", lambda: (9001, port_owner))
+
+    return setup
+
+
+def test_the_test_fakturama_is_used_when_open(desk):
+    desk([win(TEST, 10), win(OTHER, 20)], port_owner=10)
+    assert core.target_instance() == 10
+
+
+def test_the_one_open_fakturama_is_used_when_the_test_one_is_not(desk):
+    # a friend's PC: his Fakturama, opened as usual, on his own working directory
+    desk([win(OTHER, 20)], port_owner=20)
+    assert core.target_instance() == 20
+
+
+def test_two_other_fakturamas_are_never_guessed_between(desk):
+    desk([win(OTHER, 20), win("Fakturama - " + "E:" + "\\" + "live", 30)], port_owner=20)
+    with pytest.raises(core.AutomationError, match="not open"):
+        core.target_instance()
+
+
+def test_an_open_fakturama_that_does_not_serve_the_database_is_not_used(desk):
+    desk([win(OTHER, 20)], port_owner=99)  # someone else holds port 9001
+    with pytest.raises(core.AutomationError):
+        core.target_instance()

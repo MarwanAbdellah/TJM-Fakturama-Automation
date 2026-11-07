@@ -17,11 +17,15 @@ uv run image2cash extract <image|pdf>          # OCR + validate only, no UI
 
 ## Hard rules
 
-- **Only the test workspace.** The automation drives the window titled
-  `Fakturama - <config.workdir()>`, and only if that process owns the DB port.
-  `ui.core.target_instance()` enforces this. Never weaken it: a second
-  Fakturama (for example the live workspace) owns port 9001, and then every DB
-  check would read the wrong data.
+- **Drive only the Fakturama that serves the database.** The automation drives
+  the window titled `Fakturama - <config.workdir()>` (the test workspace). If
+  that is not open, it uses the one Fakturama that is open, by the user's
+  decision (2026-11-07), so it works with whatever Fakturama a tester opened.
+  Either way the driven process must own the DB port, and with two Fakturamas
+  open and no test one it stops: `ui.core.target_instance()` enforces this.
+  Never drop the port-owner check: reading one instance while driving another
+  verifies the wrong data. On a PC with live data, keep the test Fakturama
+  open (or nothing) when running.
 - **The DB is read-only.** `verify/db.py` issues SELECT only. Every write goes
   through Fakturama's UI.
 - **Live runs move the real mouse and keyboard.** Don't run them while someone

@@ -183,6 +183,13 @@ def target_instance() -> int:
     wd = current_workdir(windows)
     pids = {w.process_id() for w in windows if re.match(main_title(wd), w.window_text())}
     if not pids:
+        # The user's rule: with no test Fakturama open, use the one Fakturama that is open, as long
+        # as that same process serves the database we verify against. Two open: no guess.
+        open_fk = {w.process_id(): w.window_text() for w in windows if re.fullmatch(r"Fakturama - .+", w.window_text())}
+        port, owner = _db_port_owner()
+        if len(open_fk) == 1 and owner in open_fk:
+            log.warning("test Fakturama is not open; using the open %r, which serves the database", open_fk[owner])
+            return owner
         exe = config.fakturama_home() / config.EXE if config.fakturama_home() else config.EXE
         others = sorted({t for w in windows if (t := w.window_text()).startswith("Fakturama")})
         raise AutomationError(
@@ -221,15 +228,21 @@ class UI:
         from pywinauto.application import Application
 
         pid = target_instance()
-        wd = current_workdir(_swt_windows())
+        # the exact title of the window target_instance chose (the test one, or the one open Fakturama)
+        title = next(
+            w.window_text()
+            for w in _swt_windows()
+            if w.process_id() == pid and re.fullmatch(r"Fakturama - .+", w.window_text())
+        )
+        pattern = re.escape(title) + "$"
         # Maximize first. A minimized window is invisible to UIA (win32 still sees it), and in a
         # small window the Order's fields lie off-screen, so clicks and typing miss them.
-        w32 = Application(backend="win32").connect(process=pid).window(title_re=main_title(wd))
+        w32 = Application(backend="win32").connect(process=pid).window(title_re=pattern)
         if not w32.is_maximized():
             w32.maximize()
             time.sleep(1)
         self.uia_app = Application(backend="uia").connect(process=pid)
-        self.main = self.uia_app.window(title_re=main_title(wd)).wrapper_object()
+        self.main = self.uia_app.window(title_re=pattern).wrapper_object()
         self.w32_app = Application(backend="win32").connect(process=self.main.process_id())
         self.w32 = self.w32_app.window(handle=self.main.handle)
         self._shot = 0

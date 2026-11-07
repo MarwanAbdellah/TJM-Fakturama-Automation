@@ -165,13 +165,15 @@ or Resume with its command, and each exit code.
      Fakturama preferences (open it in Fakturama once), or `FAKTURAMA_WORKDIR`,
      `HSQL_URL`, `HSQL_USER`, `HSQL_PASSWORD`.
    - **HSQLDB driver:** the `org.hsqldb.hsqldb_*.jar` Fakturama ships, or `HSQL_JAR`.
-   - **Only the configured instance is ever driven.** That is the window titled
-     `Fakturama - <FAKTURAMA_WORKDIR>`, and only if that same process owns the
-     database port.
-   - If another Fakturama is open (for example your live workspace), it owns
-     port 9001. Runs then refuse to start, and the app disables Proceed and says
-     why.
-   - Close the other instance, then start the test one.
+   - **Which Fakturama is driven.** The test one (window titled
+     `Fakturama - <its working directory>`) if it is open. Otherwise the one
+     Fakturama that is open, whatever its working directory, so a tester can
+     simply open Fakturama as usual and press Book.
+   - **Always:** the driven Fakturama must be the program that serves the
+     database (port 9001), or every check would read the wrong data. With two
+     Fakturamas open and no test one, the run stops and says which are open.
+   - **Live data:** if you also keep a live Fakturama, have the test one (or
+     none) open when you book; an open live Fakturama alone would be used.
 
 ## Run
 

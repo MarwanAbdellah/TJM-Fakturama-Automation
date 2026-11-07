@@ -124,7 +124,8 @@ Prices come from the catalogue & Product prices are never typed into the Order; 
   order stops the run instead of being overwritten. \\
 Idempotent and resumable & A reference that already has documents is never booked twice; a saved Order without an
   Invoice resumes at the Invoice step after being re-verified against the image. \\
-Safe by construction & Only the test workspace is driven (window title \emph{and} database-port owner must match), one run
+Safe by construction & The test Fakturama is driven if open, otherwise the single open one; either way it must own the
+  database port, so checks never read another instance's data. One run
   at a time (file lock), never close an unsaved tab, no machine-specific paths in code. \\
 \bottomrule
 \end{tabularx}

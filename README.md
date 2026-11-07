@@ -41,7 +41,7 @@ It runs from a CLI too.
 
 - Design: [`docs/design.md`](docs/design.md) (v1), [`docs/design_v2.md`](docs/design_v2.md) (app, scrolling, USD/pharma data) and [`docs/design_v3.md`](docs/design_v3.md) (speed, queue, PDF, catalogue prices, unseen layouts)
 - Review record: [`docs/egm_review.md`](docs/egm_review.md), the Elephant-Goldfish reviews and what the live app revealed
-- Diagrams: [`docs/diagrams/`](docs/diagrams), hand-drawn (architecture, flow, control grounding)
+- Diagrams: [`docs/diagrams/`](docs/diagrams), hand-drawn (architecture, flow, control grounding, setup)
 - Evidence: [`docs/screenshots/`](docs/screenshots), annotated, one per step
 
 ## Diagrams
@@ -90,6 +90,8 @@ fails. It also keeps its own log in `runs/app.log`: extractions, each Proceed
 or Resume with its command, and each exit code.
 
 ## Setup
+
+![Setup, step by step](docs/diagrams/setup.svg)
 
 **Requirements:** Windows 10/11, Fakturama 2.2.0, Python 3.12, [uv](https://docs.astral.sh/uv/), and Node.js (only to regenerate the diagrams).
 

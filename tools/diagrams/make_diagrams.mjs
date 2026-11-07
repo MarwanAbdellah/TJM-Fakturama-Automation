@@ -149,3 +149,34 @@ draw("grounding.svg", {
     { from: "l", to: "rb", via: "v" }, { from: "g", to: "rb", via: "v" },
   ],
 });
+
+// 4. Setup, step by step ---------------------------------------------------------
+draw("setup.svg", {
+  w: 1500, h: 700, title: "Set it up, step by step", sub: "Once per PC: Fakturama, then image2cash. Then every time: start the app and book",
+  groups: [
+    { x: 30, y: 110, w: 1440, h: 160, t: "1. Fakturama (once)" },
+    { x: 30, y: 310, w: 1440, h: 160, t: "2. image2cash (once)" },
+    { x: 30, y: 510, w: 1440, h: 160, t: "3. Every time" },
+  ],
+  nodes: [
+    { id: "fi", x: 60, y: 160, w: 300, h: 85, t: "Install Fakturama 2.2.0", s: ["fakturama.info/download", "any folder or drive"] },
+    { id: "fw", x: 400, y: 160, w: 300, h: 85, t: "Start it once", s: ["pick a working directory", "e.g. D:\\Fakturama\\test"] },
+    { id: "fc", x: 740, y: 160, w: 300, h: 85, t: "Currency: Germany (€)", s: ["File → Preferences", "currency locale de/DE"] },
+    { id: "fo", x: 1080, y: 160, w: 360, h: 85, t: "Keep Fakturama open", s: ["Book uses the Fakturama", "that is open"], hi: true },
+    { id: "gi", x: 60, y: 360, w: 300, h: 85, t: "Install git and uv", s: ["git-scm.com · docs.astral.sh/uv", "then open a terminal (CMD)"] },
+    { id: "gc", x: 400, y: 360, w: 300, h: 85, t: "git clone, then cd", s: ["github.com/MarwanAbdellah/", "TJM-Fakturama-Automation"] },
+    { id: "gs", x: 740, y: 360, w: 300, h: 85, t: "uv run image2cash setup", s: ["installs packages (uv sync)", "downloads the OCR models"] },
+    { id: "ge", x: 1080, y: 360, w: 360, h: 85, t: ".env (optional)", s: ["copy .env.example → .env", "LLM_API_KEY only for AI fallback"] },
+    { id: "ra", x: 60, y: 560, w: 300, h: 85, t: "Start the app", s: ["uv run streamlit run app/", "streamlit_app.py → localhost:8501"] },
+    { id: "rs", x: 400, y: 560, w: 300, h: 85, t: "Pick an order", s: ["Home Test Example is preselected", "or upload your own"] },
+    { id: "rb", x: 740, y: 560, w: 300, h: 85, t: "Book this order", s: ["hands off mouse and keyboard", "while it types"], hi: true },
+    { id: "rd", x: 1080, y: 560, w: 360, h: 85, t: "Done and verified", s: ["Order + linked Invoice", "checked in Fakturama's database"] },
+  ],
+  edges: [
+    { from: "fi", to: "fw" }, { from: "fw", to: "fc" }, { from: "fc", to: "fo" },
+    { from: "fo", to: "gi", via: "v", at: 290 },
+    { from: "gi", to: "gc" }, { from: "gc", to: "gs" }, { from: "gs", to: "ge" },
+    { from: "ge", to: "ra", via: "v", at: 490 },
+    { from: "ra", to: "rs" }, { from: "rs", to: "rb" }, { from: "rb", to: "rd" },
+  ],
+});

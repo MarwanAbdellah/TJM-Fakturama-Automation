@@ -22,3 +22,9 @@ select, create and manual review.
 How each control is found, in order of preference. No coordinates are stored.
 
 ![grounding](grounding.svg)
+
+## Setup, step by step
+
+What a new user does, once per PC and then every time.
+
+![setup](setup.svg)

@@ -223,3 +223,16 @@ def test_saved_documents_must_name_the_chosen_debtor(monkeypatch):
     assert debtor.is_debtor_of(ctx, 58)
     assert not debtor.is_debtor_of(ctx, 59)  # delivery address from another contact
     assert not debtor.is_debtor_of(ctx, 60)  # no receivers at all
+
+
+@pytest.mark.parametrize(
+    "docs, state",
+    [
+        ([], "new"),
+        ([{"dtype": "Order", "number": "PO7"}], "resume"),  # saved Order, no Invoice: finish it
+        ([{"dtype": "Order", "number": "PO44"}, {"dtype": "Invoice", "number": "INV43"}], "booked"),  # batch skips
+        ([{"dtype": "Order", "number": "PO7"}, {"dtype": "Order", "number": "PO8"}], "booked"),
+    ],
+)
+def test_booking_state(docs, state):
+    assert order.booking_state(docs) == state

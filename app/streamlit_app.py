@@ -187,8 +187,18 @@ def _preview(draft: OrderDraft, db) -> list[tuple[str, str]]:
     docs = db.documents_with_ref(draft.external_ref)
     d = draft.debtor
     out = [("Fakturama", "reachable")]
+    from image2cash.steps.order import booking_state
+
+    numbers = ", ".join(x["number"] for x in docs)
     out.append(
-        ("Order", f"exists already: {[x['number'] for x in docs]} → run will stop" if docs else "will be created")
+        (
+            "Order",
+            {
+                "new": "will be created",
+                "resume": f"{numbers} saved, no Invoice yet → the run creates the Invoice",
+                "booked": f"already booked: {numbers} → a single run stops; a batch skips it",
+            }[booking_state(docs)],
+        )
     )
     n = len(db.contacts_matching(d.company, d.first_name, d.last_name, d.billing.zip, d.billing.city))
     out.append(
@@ -675,6 +685,20 @@ def enqueue(keys: list[str], batch: bool = False) -> None:
             ss.skipped.append((ss.orders[k]["name"], f"same order ({ref}) as {first[ref]}; booked once"))
         else:
             first[ref] = ss.orders[k]["name"]
+    if batch:  # a fully booked order is skipped up front, not run (and retried) only to stop
+        from image2cash.steps.order import booking_state
+        from image2cash.verify import db
+
+        for k in list(keys):
+            try:
+                docs = db.documents_with_ref(ss.orders[k]["edited"]["external_ref"])
+            except Exception as exc:  # noqa: BLE001 - the run's own preflight still guards it
+                log.debug("batch pre-check: %s", exc)
+                continue
+            if booking_state(docs) == "booked":
+                keys.remove(k)
+                numbers = ", ".join(d["number"] for d in docs)
+                ss.skipped.append((ss.orders[k]["name"], f"already booked as {numbers}; not booked again"))
     if not keys:
         return
     for k in keys:

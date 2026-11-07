@@ -20,6 +20,16 @@ def booked_currency(display: str) -> str | None:
     return next((CURRENCY_SIGNS[c] for c in display if c in CURRENCY_SIGNS), None)
 
 
+def booking_state(existing: list[dict]) -> str:
+    """What the documents already saved for a Cust.Ref. mean: 'new' (none), 'resume' (exactly
+    one saved Order and no Invoice: the run continues at the Invoice) or 'booked' (anything else,
+    e.g. Order + Invoice: never booked twice)."""
+    if not existing:
+        return "new"
+    orders = [d for d in existing if d["dtype"] == "Order"]
+    return "resume" if len(orders) == 1 and len(existing) == 1 else "booked"
+
+
 def preflight(ctx: Ctx) -> None:
     """Idempotency: never create a second Order/Invoice for the same reference.
 
@@ -28,13 +38,12 @@ def preflight(ctx: Ctx) -> None:
     totals, debtor) and the flow resumes at the Invoice step.
     """
     existing = db.documents_with_ref(ctx.order.external_ref)
-    if not existing:
+    state = booking_state(existing)
+    if state == "new":
         ctx.record("preflight", "ok", existing=0)
         return
-    orders = [d for d in existing if d["dtype"] == "Order"]
-    others = [d for d in existing if d["dtype"] != "Order"]
-    if len(orders) == 1 and not others:
-        ctx.order_no = orders[0]["number"]
+    if state == "resume":
+        ctx.order_no = existing[0]["number"]
         ctx.resume_at = "invoice"
         ctx.record("preflight", "resume", order=ctx.order_no)
         return

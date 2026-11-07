@@ -116,8 +116,8 @@ or Resume with its command, and each exit code.
 >    itself (it waits up to 10 minutes).
 >
 >    **Expect a pause of up to a minute or two before anything moves.** Fakturama
->    takes about 70 s to start, and the very first OCR call downloads and loads the
->    OCR models. Nothing is stuck: don't click or press Book again, and keep your
+>    takes about 70 s to start, and loading the OCR models takes a few seconds
+>    (or longer if you skipped `uv run image2cash setup`). Nothing is stuck: don't click or press Book again, and keep your
 >    hands off the mouse and keyboard once it starts typing.
 > 4. If the run stops with *"currency shown by Fakturama … is not recognised"* or
 >    *"order is in EUR, Fakturama books in …"*, set **File → Preferences** currency
@@ -150,9 +150,12 @@ or Resume with its command, and each exit code.
    In the Streamlit app you can skip this: **Book this order** starts Fakturama on
    the configured workspace if it is closed (about 70 s), then runs the order. It
    refuses to start a second Fakturama while another program holds the database port.
-2. Install the dependencies. The first OCR call downloads Indra's models.
+2. Install the dependencies and download the OCR models in one go. `uv run`
+   syncs the packages first (like `uv sync`), then `setup` fetches Indra's
+   models from Hugging Face once, so the first order isn't slowed down. `uv sync`
+   alone cannot do this, because it installs packages but never runs code.
    ```bash
-   uv sync
+   uv run image2cash setup
    ```
 3. Nothing is tied to one PC; the settings are found on each machine
    (`src/image2cash/config.py`), and any of them can be set in `.env`:

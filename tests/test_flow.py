@@ -53,3 +53,13 @@ def test_rejected_source_is_logged(tmp_path):
 )
 def test_batch_step(code, tries, step):
     assert flow.batch_step(code, tries) == step
+
+
+def test_setup_loads_the_ocr_models(monkeypatch, capsys):
+    from image2cash import cli
+    from image2cash.extract import ocr
+
+    loaded = []
+    monkeypatch.setattr(ocr, "_engine", lambda: loaded.append(True))
+    assert cli.main(["setup"]) == 0
+    assert loaded and "OCR models ready" in capsys.readouterr().out

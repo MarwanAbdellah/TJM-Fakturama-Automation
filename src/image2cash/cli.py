@@ -35,6 +35,11 @@ def main(argv: list[str] | None = None) -> int:
     v = sub.add_parser("verify", help="read-only DB check of the documents for a Cust.Ref.")
     v.add_argument("cust_ref")
 
+    sub.add_parser(
+        "setup",
+        help="download the OCR models now (one time, from Hugging Face) instead of on the first booking",
+    )
+
     a = p.parse_args(argv)
     from image2cash.extract import ExtractionError
 
@@ -46,6 +51,18 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _dispatch(p: argparse.ArgumentParser, a: argparse.Namespace) -> int:
+    if a.cmd == "setup":
+        import time
+
+        from image2cash.extract.ocr import _engine
+
+        # uv sync installs packages but cannot run code, so the models come down here (or on the
+        # first OCR). Later runs read them from the Hugging Face cache, offline.
+        print("Downloading and loading the OCR models (one time; can take a few minutes)...")
+        t = time.time()
+        _engine()
+        print(f"OCR models ready in {time.time() - t:.0f} s. The app and the CLI can now read orders offline.")
+        return 0
     if a.cmd == "extract":
         from image2cash.extract import extract
         from image2cash.validate import check_order

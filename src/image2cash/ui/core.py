@@ -106,7 +106,8 @@ def wait_for(predicate: Callable[[], object], timeout: float = 10, interval: flo
 def listener_pid(netstat: str, port: int) -> int | None:
     """PID listening on ``port`` in `netstat -ano` output. Windows translates the State column
     ('LISTENING', 'ABHÖREN', 'ESCUCHANDO'...), so a listener is told by its foreign address
-    port 0 ('0.0.0.0:0', '[::]:0'), which is the same in every language."""
+    port 0 ('0.0.0.0:0', '[::]:0'), which is the same in every language. pid 0 is skipped: Windows
+    shows closed connections (TIME_WAIT) under it, and after a run they can be listed first."""
     for line in netstat.splitlines():
         parts = line.split()
         if (
@@ -115,6 +116,7 @@ def listener_pid(netstat: str, port: int) -> int | None:
             and parts[1].endswith(f":{port}")
             and parts[2].endswith(":0")
             and parts[-1].isdigit()
+            and int(parts[-1]) != 0
         ):
             return int(parts[-1])
     return None

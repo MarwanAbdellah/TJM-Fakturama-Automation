@@ -107,6 +107,14 @@ def test_listener_pid_reads_netstat():
 """
     assert listener_pid(german, 9001) == 4242
     assert listener_pid("  TCP    [::]:9001              [::]:0                 LISTENING       77", 9001) == 77
+    # A friend's PC after the first run: a closed connection on the port, owned by pid 0, printed
+    # before the real listener. pid 0 is never a program, so it is never the database owner.
+    after_a_run = """
+  TCP    0.0.0.0:9001           0.0.0.0:0              TIME_WAIT        0
+  TCP    0.0.0.0:9001           0.0.0.0:0              LISTENING        5150
+"""
+    assert listener_pid(after_a_run, 9001) == 5150
+    assert listener_pid("  TCP    0.0.0.0:9001           0.0.0.0:0              TIME_WAIT        0", 9001) is None
 
 
 @pytest.mark.parametrize(

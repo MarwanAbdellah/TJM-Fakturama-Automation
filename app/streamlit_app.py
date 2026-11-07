@@ -278,7 +278,8 @@ def drive_queue() -> None:
         launch(cur, resume=order_saved(read_log(Path(item["run_dir"]))))
         return
     if step == "skip":
-        why = stop_reason(read_log(Path(item["run_dir"]))) or "no reason logged"
+        run_dir = Path(item["run_dir"])
+        why = stop_reason(read_log(run_dir)) or crash_reason(run_dir) or "no reason logged"
         ss.skipped.append((item["name"], f"{item['status']} (tried {tries}x): {why}"))
     if step == "pause":
         item["tries"] -= 1  # the lock, not this order, stopped it
@@ -302,6 +303,13 @@ def stop_reason(log: dict | None) -> str | None:
     return None if i is None else f"{steps[i - 1]['step']}: {steps[i].get('reason', '')}"
 
 
+def crash_reason(run_dir: Path) -> str | None:
+    """The last exception line of a run that died before its step log existed (for example it
+    could not reach Fakturama): otherwise only the console output.log has it."""
+    lines = tail(run_dir / "output.log", 300) or tail(run_dir / "run.log", 300)
+    return next((s.strip() for s in reversed(lines) if re.match(r"\s*[\w.]+(Error|Exception): ", s)), None)
+
+
 def order_saved(log: dict | None) -> bool:
     return bool(log) and any(s["step"] == "4.5 order in DB" and s["status"] == "ok" for s in log["steps"])
 
@@ -321,6 +329,8 @@ def show_run(run_dir: Path, code: int | None, sha: str | None = None) -> None:
         text, kind = EXIT.get(code, (f"exit {code}", "error"))
         if why := stop_reason(log):  # say why up front; the step table below has the detail
             text += f"\n\n**Stopped at {plain(why)}**"
+        elif code and (crash := crash_reason(run_dir)):  # died before the first step was logged
+            text += f"\n\n**{plain(crash)}**"
         getattr(st, kind)(text)
     # run.log has every step and UI action; output.log is the raw console (crashes before logging started).
     lines = tail(run_dir / "run.log", 15 if code is None else 60) or tail(run_dir / "output.log", 60)

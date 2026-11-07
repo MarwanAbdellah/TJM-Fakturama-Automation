@@ -20,9 +20,9 @@ Fakturama's custom-drawn tables with **local OCR** (Indra), and checks every ste
 through UI read-back and **read-only** queries on Fakturama's database.
 
 > [!IMPORTANT]
-> **▶ Watch the demo (76 s): [youtu.be/Sn4Bfru24ZM](https://youtu.be/Sn4Bfru24ZM)**
+> **▶ Watch the demo (79 s): [youtu.be/JQI2nbLEsoI](https://youtu.be/JQI2nbLEsoI)**
 >
-> [![Image-to-Cash demo video](https://img.youtube.com/vi/Sn4Bfru24ZM/hqdefault.jpg)](https://youtu.be/Sn4Bfru24ZM)
+> [![Image-to-Cash demo video](https://img.youtube.com/vi/JQI2nbLEsoI/hqdefault.jpg)](https://youtu.be/JQI2nbLEsoI)
 
 - **Architecture and design rationale (3 pages):** [docs/paper/architecture.pdf](docs/paper/architecture.pdf) (LaTeX source alongside)
 - **Design:** [`docs/design.md`](docs/design.md), [`docs/design_v2.md`](docs/design_v2.md), [`docs/design_v3.md`](docs/design_v3.md)

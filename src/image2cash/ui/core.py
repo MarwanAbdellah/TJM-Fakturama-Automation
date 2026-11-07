@@ -218,6 +218,29 @@ def target_instance() -> int:
 
 
 _ANNOUNCED: dict[int, str] = {}  # pid -> window title already logged as the adopted Fakturama
+DOCS_WIDTH = 0.60  # end of a run: the floating Documents panel is widened to 60 % of the window
+DOCS_BOTTOM = 0.85  # ...and stretched down to 85 % of the window height
+
+
+def float_resize(docs, win, width: float = DOCS_WIDTH, bottom: float = DOCS_BOTTOM) -> list:
+    """Mouse drags that enlarge the floating Documents panel: its left edge out to ``width`` of
+    the window, its bottom edge down to ``bottom``. Fakturama shows Documents as a pop-out over
+    the editor (its views are collapsed to the right-hand icon strip), resized like any window
+    by its edges; calibrated live: grab 3 px left of the left edge, 1 px below the bottom edge.
+    Only ever grows it. Rects are (l, t, r, b)."""
+    (dl, dt, dr, db), (wl, wt, wr, wb) = docs, win
+    drags = []
+    to_x = int(wr - width * (wr - wl))
+    if to_x < dl - 15:
+        y = (dt + db) // 2
+        drags.append(((dl - 3, y), (to_x - 3, y)))
+        dl = to_x
+    to_y = int(wt + bottom * (wb - wt))
+    if to_y > db + 15:
+        x = (dl + dr) // 2
+        drags.append(((x, db + 1), (x, to_y + 1)))
+    return drags
+
 
 # One worker writes screenshots in order; the interpreter waits for it at exit, so none are lost.
 UIA_MAXIMIZED = 1  # UIA WindowVisualState: 0 normal, 1 maximized, 2 minimized (not Win32's SW_*)
@@ -583,18 +606,37 @@ class UI:
         self.click(self.find(name, "Text", root=nav))
         time.sleep(1)
 
-    def show_documents(self, node: str) -> None:
-        """Data > Documents (a tab that fills its area) with the ``node`` list ('Invoices' or
-        'Orders') clicked, no search. The default 'This transaction' node and the debtor node are
-        stale after a save (they keep the last document picked by hand). Evidence only: never
-        fails a verified run."""
+    def show_documents(self, node: str, widen: bool = False) -> None:
+        """Data > Documents with the ``node`` list ('Invoices' or 'Orders') clicked, no search.
+        With ``widen`` (the end of a run) the floating Documents panel is enlarged so its columns
+        are readable on a small screen; it floats over the editor, so nothing needs undoing.
+        The default 'This transaction' node and the debtor node are stale after a save. Evidence
+        only: never fails a verified run."""
         try:
             self.nav("Documents")
             tree = [t for t in self.main.descendants(control_type="TreeItem") if t.element_info.name == node]
             self.click(tree[0])
             time.sleep(0.5)
+            if widen:
+                box = lambda r: (r.left, r.top, r.right, r.bottom)  # noqa: E731
+                docs, win = box(self.view_panel("Documents").rectangle()), box(self.main.rectangle())
+                for move in float_resize(docs, win):
+                    self._drag(move)
         except Exception as exc:  # noqa: BLE001 - a screenshot is not worth stopping a verified run
             log.debug("documents view: could not show %s: %s", node, exc)
+
+    def _drag(self, move) -> None:
+        """Press on the divider, move in small steps (SWT follows the mouse), release."""
+        from pywinauto import mouse
+
+        (x1, y1), (x2, y2) = move
+        self.focus()
+        mouse.press(coords=(x1, y1))
+        for i in range(1, 7):
+            time.sleep(0.05)
+            mouse.move(coords=(x1 + (x2 - x1) * i // 6, y1 + (y2 - y1) * i // 6))
+        mouse.release(coords=(x2, y2))
+        time.sleep(0.5)
 
     # ---- evidence ----------------------------------------------------------
     def screenshot(self, name: str, boxes: list[tuple[object, str]] | None = None) -> Path | None:

@@ -63,3 +63,14 @@ def test_screenshots_appear_only_when_complete(tmp_path):
     core._save_png(Image.new("RGB", (4, 4)), path)
     assert Image.open(path).size == (4, 4)
     assert [p.name for p in tmp_path.iterdir()] == ["01_shot.png"]  # no '.part' left behind
+
+
+def test_the_floating_documents_panel_is_enlarged_by_its_edges():
+    win = (-8, -8, 1928, 1040)
+    docs = (1111, 115, 1897, 511)  # measured live: the pop-out over the editor
+    (left, bottom) = core.float_resize(docs, win)
+    (x1, y1), (x2, y2) = left
+    assert x1 == 1108 and y1 == y2 and x2 == int(1928 - 0.6 * 1936) - 3  # left edge out to 60 %
+    (x1, y1), (x2, y2) = bottom
+    assert y1 == 512 and x1 == x2 and y2 == int(-8 + 0.85 * 1048) + 1  # bottom edge down to 85 %
+    assert core.float_resize((100, 115, 1897, 950), win) == []  # already big: never shrinks

@@ -204,7 +204,7 @@ def verify(ctx: Ctx) -> None:
             # Compare persisted values exactly, including catalogue price remainders.
             checks[f"item {src['pos']} {key} copied"] = src[key] is not None and it[key] == src[key]
     checks.update(_copied_receivers(inv_receivers, order_receivers))
-    ctx.ui.show_documents("Invoices")
+    ctx.ui.show_documents("Invoices", widen=True)  # the end of the run: wide enough to check
     shot = ctx.shot("documents_final")
     details = dict(
         invoice=i,

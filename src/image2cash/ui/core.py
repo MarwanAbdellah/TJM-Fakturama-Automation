@@ -628,12 +628,13 @@ class UI:
             raise AutomationError("active editor has no pane")
         return panes[0]
 
-    def nav(self, name: str) -> None:
-        """Click a link in the left navigation view (Data / New / Miscellaneous)."""
+    def nav(self, name: str, settle: float = 1.0) -> None:
+        """Click a link in the left navigation view (Data / New / Miscellaneous). ``settle``
+        is a fixed wait for the view to appear; a caller that waits for its own content passes 0."""
         log.debug("navigate to %r", name)
         nav = self.find("Navigation View", "Pane")
         self.click(self.find(name, "Text", root=nav))
-        time.sleep(1)
+        time.sleep(settle)
 
     def show_documents(self, node: str, widen: bool = False) -> None:
         """Data > Documents with the ``node`` list ('Invoices' or 'Orders') clicked, no search.
@@ -642,10 +643,17 @@ class UI:
         The default 'This transaction' node and the debtor node are stale after a save. Evidence
         only: never fails a verified run."""
         try:
-            self.nav("Documents")
-            tree = [t for t in self.main.descendants(control_type="TreeItem") if t.element_info.name == node]
-            self.click(tree[0])
-            time.sleep(0.5)
+            self.nav("Documents", settle=0)
+            # wait for the list node itself instead of a fixed second
+            item = wait_for(
+                lambda: next(
+                    (t for t in self.main.descendants(control_type="TreeItem") if t.element_info.name == node), None
+                ),
+                5,
+                what=f"Documents {node!r} node",
+            )
+            self.click(item)
+            time.sleep(0.3)
             if widen:
                 box = lambda r: (r.left, r.top, r.right, r.bottom)  # noqa: E731
                 docs, win = box(self.view_panel("Documents").rectangle()), box(self.main.rectangle())
@@ -655,17 +663,17 @@ class UI:
             log.debug("documents view: could not show %s: %s", node, exc)
 
     def _drag(self, move) -> None:
-        """Press on the divider, move in small steps (SWT follows the mouse), release."""
+        """Press on a panel edge, move in small steps (SWT follows the mouse), release."""
         from pywinauto import mouse
 
         (x1, y1), (x2, y2) = move
         self.focus()
         mouse.press(coords=(x1, y1))
         for i in range(1, 7):
-            time.sleep(0.05)
+            time.sleep(0.03)
             mouse.move(coords=(x1 + (x2 - x1) * i // 6, y1 + (y2 - y1) * i // 6))
         mouse.release(coords=(x2, y2))
-        time.sleep(0.5)
+        time.sleep(0.2)
 
     # ---- evidence ----------------------------------------------------------
     def screenshot(self, name: str, boxes: list[tuple[object, str]] | None = None) -> Path | None:

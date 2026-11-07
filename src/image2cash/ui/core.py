@@ -571,27 +571,18 @@ class UI:
         self.click(self.find(name, "Text", root=nav))
         time.sleep(1)
 
-    def show_documents(self, node: str, cust_ref: str) -> None:
-        """Documents view on 'Invoices' or 'Orders', searched for the Cust.Ref. The default
-        'This transaction' node and the debtor node are stale after a save (they keep the last
-        document picked by hand), so screenshots showed nothing or another customer.
-        Evidence only: never fails a verified run."""
+    def show_documents(self, node: str) -> None:
+        """Data > Documents (a tab that fills its area) with the ``node`` list ('Invoices' or
+        'Orders') clicked, no search. The default 'This transaction' node and the debtor node are
+        stale after a save (they keep the last document picked by hand). Evidence only: never
+        fails a verified run."""
         try:
             self.nav("Documents")
             tree = [t for t in self.main.descendants(control_type="TreeItem") if t.element_info.name == node]
-            tree[0].select()
-            time.sleep(0.3)
-            label = self.find("Search:", "Text", timeout=3).rectangle()
-            box = next(
-                e
-                for e in self.main.descendants(control_type="Edit")
-                if abs(e.rectangle().top - label.top) < 12 and e.rectangle().left >= label.right - 5
-            )
-            box.click_input()
-            paste(cust_ref)
-            time.sleep(1)
+            self.click(tree[0])
+            time.sleep(0.5)
         except Exception as exc:  # noqa: BLE001 - a screenshot is not worth stopping a verified run
-            log.debug("documents view: could not show %s for %r: %s", node, cust_ref, exc)
+            log.debug("documents view: could not show %s: %s", node, exc)
 
     # ---- evidence ----------------------------------------------------------
     def screenshot(self, name: str, boxes: list[tuple[object, str]] | None = None) -> Path | None:

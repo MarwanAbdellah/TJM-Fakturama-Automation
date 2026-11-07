@@ -96,7 +96,7 @@ def booked(monkeypatch):
         invoice_no="INV1",
         contact_id=7,
         cache={"invoice_dates": dict(number="INV1", date="2026-11-06", service_date="2026-11-05")},
-        ui=NS(nav=lambda *a: None, show_documents=lambda *a: None),
+        ui=NS(nav=lambda *a: None, show_documents=lambda *a, **k: None),
         shot=lambda *a, **k: None,
         record=lambda *a, **k: records.append((a, k)),
     )

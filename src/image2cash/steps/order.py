@@ -224,7 +224,7 @@ def verify_saved_order(ctx: Ctx) -> None:
         checks[f"item {src.pos} discount"] = discount_ok(it["rebate"], src.discount_pct)
         checks[f"item {src.pos} vat"] = abs(it["vat_value"] * 100 - src.vat_pct) < Decimal("0.001")
     failed = [k for k, v in checks.items() if not v]
-    ui.show_documents("Orders", o.external_ref)
+    ui.show_documents("Orders")
     shot = ctx.shot("documents_after_order")
     if failed:
         ctx.record("4.5 order in DB", "FAIL", failed=failed, db=d, items=items, receivers=receivers, shot=shot)

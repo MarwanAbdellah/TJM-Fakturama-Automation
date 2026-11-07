@@ -21,7 +21,7 @@ def _ctx(o):
         order_no="PO1",
         invoice_no="INV1",
         contact_id=7,
-        ui=NS(nav=lambda *a: None, show_documents=lambda *a: None),
+        ui=NS(nav=lambda *a: None, show_documents=lambda *a, **k: None),
         shot=lambda *a, **k: None,
         record=lambda *a, **k: None,
     )

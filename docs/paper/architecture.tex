@@ -172,14 +172,7 @@ opt-in fallback for layouts the local parser cannot read: one structured-output 
 (OpenRouter by default), retried on busy replies and asked once more with the problems the checks found. To trust it
 more: run it on every order and compare it field by field with the local OCR, flagging disagreements for review;
 measure it on a labelled set of unseen layouts before relying on it; let it fall back to a local vision model when the
-service is unavailable, so images can stay on the machine; and keep its answers in the run evidence.
-
-The second would be a reproducible environment, so anyone gets the same setup with one command. Docker fits the parts
-that need no screen: OCR, parsing, the checks, the AI reader and the unit tests, pinned in an image with the OCR models
-baked in. Docker cannot drive Fakturama itself, because UI Automation needs a real, unlocked Windows desktop session,
-which a container does not have. For the end-to-end runs that means a scripted Windows virtual machine (or a Windows
-Sandbox configuration) with Fakturama, a test workspace already set to EUR and this repository installed, restored to
-the same clean state before every run. After that: a generic watcher for unexpected dialogs, cleanup of a failed run's
-records, and running a whole queue in one process.
+service is unavailable, so images can stay on the machine; and keep its answers in the run evidence. After that: a
+generic watcher for unexpected dialogs, cleanup of a failed run's records, and running a whole queue in one process.
 
 \end{document}
